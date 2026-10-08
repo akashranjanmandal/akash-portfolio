@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Akash Ranjan Mandal — Full-stack & DevOps Engineer · The Ride</title>
+    <meta name="description" content="Hop into a Kolkata taxi and ride across a floating island in the sky — the interactive portfolio of Akash Ranjan Mandal, full-stack engineer and DevOps lead at GOBT. Work: GharKaMali, PizzaHap, GFTD, Al-Taqwa, Accurate Astro, Mastermind Abacus, AGILE Engineering, Idea Shapers and gobt.in." />
+    <meta name="author" content="Akash Ranjan Mandal" />
+    <meta name="theme-color" content="#121019" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Akash Ranjan Mandal — The Ride" />
+    <meta property="og:description" content="An interactive 3D portfolio: a Kolkata taxi ride across a floating island in the sky. Scroll to ride, or take the wheel." />
+    <meta property="og:image" content="og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Akash Ranjan Mandal — The Ride" />
+    <meta name="twitter:description" content="A Kolkata taxi ride across a floating island in the sky. Scroll to ride, or take the wheel." />
+    <meta name="twitter:image" content="og-image.jpg" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Person",
+        "name": "Akash Ranjan Mandal",
+        "jobTitle": "Full-stack Engineer & DevOps Lead",
+        "worksFor": [{ "@type": "Organization", "name": "GOBT — Group Of Blooming Technicians", "url": "https://gobt.in" }, { "@type": "Organization", "name": "Xeta Labs" }],
+        "alumniOf": { "@type": "CollegeOrUniversity", "name": "The Neotia University" },
+        "email": "mailto:akashranjanmandal@gmail.com",
+        "address": { "@type": "PostalAddress", "addressRegion": "West Bengal", "addressCountry": "IN" },
+        "sameAs": ["https://www.linkedin.com/in/akash-ranjan-mandal-95abbb215/", "https://github.com/akashranjanmandal", "https://www.instagram.com/akaas.jpeg/"],
+        "knowsAbout": ["React", "Next.js", "TypeScript", "Node.js", "Three.js", "GSAP", "Flutter", "PostgreSQL", "MongoDB", "DevOps"]
+      }
+    </script>
+    <script>
+      document.documentElement.classList.replace('no-js', 'js')
+    </script>
+  </head>
+  <body class="is-loading">
+    <a class="skip-link" href="#resume" data-action="resume">Skip the ride — read the resume</a>
+
+    <canvas class="gl" id="gl" aria-hidden="true"></canvas>
+    <div class="scrim" aria-hidden="true"></div>
+
+    <!-- loader -->
+    <div class="loader" id="loader">
+      <div class="loader__stars" aria-hidden="true"></div>
+      <div class="loader__inner">
+        <p class="loader__kicker"><span class="loader__dot"></span>Portfolio · Full-stack & DevOps</p>
+        <h1 class="loader__name" aria-label="Akash Ranjan Mandal">
+          <span class="loader__word">Akash</span>
+          <span class="loader__sub">Ranjan Mandal</span>
+        </h1>
+        <div class="loader__road" aria-hidden="true">
+          <div class="loader__lane"></div>
+          <div class="loader__done"></div>
+          <div class="loader__taxi">
+            <svg viewBox="0 0 120 56">
+              <rect x="34" y="10" width="44" height="18" rx="9" fill="#ffc61a"/>
+              <rect x="40" y="13" width="15" height="11" rx="3" fill="#1b2233"/>
+              <rect x="58" y="13" width="15" height="11" rx="3" fill="#1b2233"/>
+              <rect x="10" y="24" width="98" height="20" rx="10" fill="#ffc61a"/>
+              <rect x="44" y="4" width="22" height="7" rx="2" fill="#141218"/>
+              <circle cx="104" cy="32" r="3.5" fill="#fff6d6"/>
+              <rect x="8" y="30" width="5" height="5" rx="1.5" fill="#ff4d3a"/>
+              <g class="loader__wheel"><circle cx="32" cy="44" r="9" fill="#141218"/><circle cx="32" cy="44" r="4" fill="#d9dbe1"/><rect x="31" y="36" width="2" height="16" fill="#141218"/></g>
+              <g class="loader__wheel"><circle cx="88" cy="44" r="9" fill="#141218"/><circle cx="88" cy="44" r="4" fill="#d9dbe1"/><rect x="87" y="36" width="2" height="16" fill="#141218"/></g>
+            </svg>
+          </div>
+        </div>
+        <div class="loader__row">
+          <span class="loader__status" id="loader-status">Warming up the engine…</span>
+          <span class="loader__pct"><span id="loader-count">0</span>%</span>
+        </div>
+        <div class="loader__actions" id="loader-actions">
+          <button class="btn btn--primary btn--xl" id="start" type="button" disabled>
+            <span class="btn__label">Hop in — start the ride</span>
+          </button>
+          <label class="check"><input type="checkbox" id="start-sound" checked /> <span>Sound on</span></label>
+        </div>
+        <p class="loader__hint">Scroll to ride · or take the wheel and explore</p>
+      </div>
+    </div>
+
+    <!-- top bar -->
+    <header class="topbar" id="topbar">
+      <a class="brand" href="#top" data-goto="0" aria-label="Akash Ranjan Mandal — back to the start">
+        <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect width="64" height="64" rx="14" fill="#141218" />
+          <path d="M19.5 47 L32 16.5 L44.5 47" fill="none" stroke="#fffdf7" stroke-width="4.6" stroke-linejoin="miter" />
+          <path d="M14 36.5 H50" fill="none" stroke="#ffc61a" stroke-width="3.6" stroke-linecap="round" />
+        </svg>
+        <span class="brand__name">Akash <span>Ranjan Mandal</span></span>
+      </a>
+      <nav class="topbar__nav" aria-label="Site">
+        <button class="pill pill--ghost hide-sm" type="button" data-action="stops"><span class="pill__icon" data-icon="menu"></span><span>Stops</span></button>
+        <button class="pill pill--ghost" type="button" data-action="resume"><span class="pill__icon" data-icon="doc"></span><span class="hide-xs">Resume</span></button>
+        <button class="pill pill--ghost pill--icon" type="button" id="btn-sound" aria-pressed="true" aria-label="Sound"><span class="pill__icon" data-icon="soundOn"></span></button>
+        <button class="pill pill--accent" type="button" id="btn-mode" data-action="toggle-mode"><span class="pill__icon" data-icon="wheel"></span><span id="btn-mode-label">Take the wheel</span></button>
+      </nav>
+    </header>
+
+    <!-- the scroll track that drives the story; panels are rendered into #panels -->
+    <main class="story" id="story">
+      <h1 class="sr-only">Akash Ranjan Mandal — Full-stack Engineer & DevOps Lead</h1>
+      <div class="track" id="track"></div>
+      <div class="panels" id="panels"></div>
+    </main>
+
+    <!-- taxi meter -->
+    <aside class="meter" id="meter" aria-hidden="true">
+      <div class="meter__row"><span class="meter__k">STOP</span><span class="meter__v" id="meter-stop">00/15</span></div>
+      <div class="meter__row meter__row--big"><span class="meter__k">₹</span><span class="meter__v" id="meter-fare">30</span></div>
+      <div class="meter__row"><span class="meter__k">KM</span><span class="meter__v" id="meter-km">0.0</span></div>
+      <div class="meter__next" id="meter-next">Boarding</div>
+    </aside>
+
+    <nav class="rail" id="rail" aria-label="Jump to a stop"></nav>
+
+    <div class="scroll-cue" id="scroll-cue" aria-hidden="true"><span></span>Scroll to ride</div>
+
+    <!-- drive mode -->
+    <div class="drive" id="drive" hidden>
+      <div class="drive__hud">
+        <div class="speedo"><span id="speedo">0</span><small>km/h</small></div>
+        <div class="bugs" id="bug-count" title="Bugs fixed"><span class="bugs__icon" data-icon="bug"></span><span id="bug-num">0/12</span></div>
+      </div>
+      <canvas class="minimap" id="minimap" width="220" height="160" aria-hidden="true"></canvas>
+      <div class="zone" id="zone" hidden>
+        <div class="zone__text"><span class="zone__k" id="zone-k">Stop 06</span><strong id="zone-title">PizzaHap</strong></div>
+        <button class="btn btn--primary btn--sm" type="button" id="zone-open">Open <kbd class="hide-touch">↵</kbd></button>
+      </div>
+      <div class="keys hide-touch" id="keys">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows · drive</div>
+        <div><kbd>Shift</kbd> boost · <kbd>Space</kbd> brake · <kbd>H</kbd> honk</div>
+        <div><kbd>R</kbd> reset · <kbd>Esc</kbd> back to story</div>
+      </div>
+      <div class="stick show-touch" id="stick" aria-hidden="true"><div class="stick__knob" id="stick-knob"></div></div>
+      <div class="touch-btns show-touch">
+        <button class="round" type="button" id="btn-horn" aria-label="Honk"><span data-icon="horn"></span></button>
+        <button class="round round--accent" type="button" id="btn-boost" aria-label="Boost"><span data-icon="boost"></span></button>
+      </div>
+      <div class="drive__actions">
+        <button class="pill pill--ghost" type="button" id="btn-reset"><span class="pill__icon" data-icon="reset"></span><span>Reset</span></button>
+      </div>
+    </div>
+
+    <!-- overlays -->
+    <div class="sheet" id="stops-sheet" data-lenis-prevent role="dialog" aria-modal="true" aria-label="All stops" hidden></div>
+    <div class="modal" id="modal" data-lenis-prevent role="dialog" aria-modal="true" aria-labelledby="modal-title" hidden></div>
+    <div class="resume" id="resume" data-lenis-prevent role="dialog" aria-modal="true" aria-label="Resume" hidden></div>
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+    <div class="fader" id="fader" aria-hidden="true"></div>
+    <div class="cursor" id="cursor" aria-hidden="true"><span></span></div>
+
+    <noscript>
+      <section class="noscript">
+        <h2>Akash Ranjan Mandal</h2>
+        <p>Full-stack Engineer & DevOps Lead from West Bengal, India. DevOps Lead at GOBT and Full-stack Engineer at Xeta Labs.</p>
+        <p>This portfolio is an interactive 3D experience and needs JavaScript. The short version:</p>
+        <ul>
+          <li><a href="https://gobt.in">gobt.in</a> · <a href="https://gharkamali.com">GharKaMali</a> · <a href="https://pizzahap.com">PizzaHap</a> · <a href="https://gftd.in">GFTD</a> · <a href="https://altaqwa.in">Al-Taqwa</a></li>
+          <li><a href="https://accurateastro.in">Accurate Astro</a> · <a href="https://mastermindabacusodisha.com">Mastermind Abacus Odisha</a> · <a href="https://agileengcon.in">AGILE Engineering</a> · <a href="https://ideashapers.org">Idea Shapers</a></li>
+        </ul>
+        <p><a href="mailto:akashranjanmandal@gmail.com">akashranjanmandal@gmail.com</a> · <a href="akash-ranjan-mandal-cv.pdf">Download CV</a></p>
+      </section>
+    </noscript>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
