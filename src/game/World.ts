@@ -4,6 +4,8 @@ import type { Assets } from './Assets'
 import type { Quality } from './Engine'
 import { noise2, rng } from '../utils/math'
 import { Forest } from './Foliage'
+import { Town } from './city/Town'
+import { PLOTS, plotFrame, SPAWN } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -19,7 +21,8 @@ const SEG = 280
 export function heightAt(x: number, z: number) {
   const r = Math.hypot(x / 1.15, z)
   const n = noise2(x * 0.006 + 11, z * 0.006 - 4) * 0.65 + noise2(x * 0.02, z * 0.02) * 0.35
-  // the town is dead flat (roads and buildings sit on y = 0); undulation starts outside it
+  // under the paved town the ground sits just below the asphalt; undulation starts outside it
+  if (Math.abs(x) < 208 && Math.abs(z) < 208) return -0.08
   const flat = r < 300 ? 0 : (noise2(x * 0.01, z * 0.01) - 0.5) * 0.6 * Math.min(1, (r - 300) / 40)
   if (r < 360) return flat
   if (r < 470) {
@@ -64,9 +67,10 @@ function instanceModel(group: THREE.Group, src: THREE.Object3D, matrices: THREE.
 
 export class World {
   readonly group = new THREE.Group()
-  spawn = { pos: new THREE.Vector3(0, 0, 40), yaw: 0 }
+  spawn = { pos: new THREE.Vector3(SPAWN.x, 0.2, SPAWN.z), yaw: SPAWN.yaw }
   private sea!: THREE.Mesh
   forest: Forest | null = null
+  town!: Town
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer, private physics: Physics, private assets: Assets, private quality: Quality) {
     scene.add(this.group)
@@ -75,8 +79,9 @@ export class World {
   build() {
     this.buildTerrain()
     this.buildSea()
-    this.buildRoad()
-    this.buildTestBlock()
+    this.town = new Town(this.physics, this.assets)
+    this.town.build()
+    this.group.add(this.town.group)
     this.scatter()
   }
 
@@ -160,59 +165,13 @@ export class World {
     this.group.add(this.sea)
   }
 
-  private buildRoad() {
-    // a test boulevard; the full network comes with the city layout
-    const asphalt = this.assets.material('asphalt_02', [3, 60], { roughness: 1 })
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(9, 220).rotateX(-Math.PI / 2), asphalt)
-    road.position.set(0, 0.06, -40)
-    road.receiveShadow = true
-    this.group.add(road)
-    const kerbMat = this.assets.material('concrete_tiles', [1, 40])
-    for (const sx of [-1, 1]) {
-      const walk = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.18, 220), kerbMat)
-      walk.position.set(sx * 6.1, 0.09, -40)
-      walk.receiveShadow = true
-      walk.castShadow = true
-      this.group.add(walk)
-      this.physics.fixedBox(sx * 6.1, 0.09, -40, 1.6, 0.09, 110)
-    }
-    // lane markings
-    const dash = new THREE.MeshStandardMaterial({ color: '#e9e5d6', roughness: 0.6 })
-    for (let z = -148; z < 68; z += 9) {
-      const d = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 4).rotateX(-Math.PI / 2), dash)
-      d.position.set(0, 0.075, z)
-      this.group.add(d)
-    }
-  }
-
-  private buildTestBlock() {
-    // a two-storey Kolkata shophouse to judge materials
-    const brick = this.assets.material('red_brick_03', [4, 2.4])
-    const plaster = this.assets.material('plastered_wall_02', [3, 2], { color: '#f2dcae' })
-    const b = new THREE.Group()
-    b.position.set(-16, 0, -30)
-    this.group.add(b)
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(12, 7.5, 10), [plaster, plaster, plaster, plaster, plaster, plaster])
-    walls.position.y = 3.75
-    walls.castShadow = walls.receiveShadow = true
-    b.add(walls)
-    const base = new THREE.Mesh(new THREE.BoxGeometry(12.2, 1.2, 10.2), brick)
-    base.position.y = 0.6
-    base.castShadow = base.receiveShadow = true
-    b.add(base)
-    const door = this.assets.instance('rollershutter_door')
-    door.position.set(0, 0, 5.05)
-    b.add(door)
-    this.physics.fixedBox(-16, 3.75, -30, 6, 3.75, 5)
-  }
-
   private scatter() {
     const r = rng(77)
     const pick = (count: number, test: (x: number, z: number) => boolean, scale = 1) => {
       const out: THREE.Matrix4[] = []
       for (let i = 0; i < count * 20 && out.length < count; i++) {
-        const x = (r() - 0.5) * 900
-        const z = (r() - 0.5) * 780
+        const x = (r() - 0.5) * 920
+        const z = (r() - 0.5) * 800
         if (!test(x, z)) continue
         const y = heightAt(x, z)
         if (y < SEA + 1.2) continue
@@ -221,7 +180,18 @@ export class World {
       }
       return out
     }
-    const offRoad = (x: number, z: number) => Math.abs(x) > 12 && !(x < -8 && x > -25 && z < -22 && z > -38)
+    // trees grow outside the town, or in the green middle of a block away from landmarks
+    const plots = PLOTS.map((p) => { const f = plotFrame(p); return { x: f.x - f.fx * p.d / 2, z: f.z - f.fz * p.d / 2, r: Math.max(p.w, p.d) / 2 + 6 } })
+    const inBlockMiddle = (x: number, z: number) => {
+      const bx = ((x % 100) + 100) % 100 - 50
+      const bz = ((z % 100) + 100) % 100 - 50
+      return Math.abs(bx) < 22 && Math.abs(bz) < 22
+    }
+    const offRoad = (x: number, z: number) => {
+      const town = Math.abs(x) < 215 && Math.abs(z) < 215
+      if (town && !inBlockMiddle(x, z)) return false
+      return !plots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)
+    }
     const d = this.quality.density
     const trees1 = pick(Math.round(220 * d), offRoad, 2.3)
     const trees2 = pick(Math.round(160 * d), offRoad, 2.4)
@@ -245,27 +215,6 @@ export class World {
     const boulder = this.assets.models.get('boulder_01')?.scene
     if (boulder) instanceModel(this.group, boulder, rocks)
 
-    // street lamps along the test boulevard
-    const lamp = this.assets.models.get('street_lamp_01')?.scene
-    if (lamp) {
-      const mats: THREE.Matrix4[] = []
-      for (let z = -140; z < 60; z += 24) {
-        for (const sx of [-1, 1]) {
-          mats.push(new THREE.Matrix4().compose(new THREE.Vector3(sx * 6.9, 0.18, z + (sx > 0 ? 12 : 0)), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), sx > 0 ? -Math.PI / 2 : Math.PI / 2), new THREE.Vector3(1, 1, 1)))
-        }
-      }
-      instanceModel(this.group, lamp, mats)
-    }
-    const bench = this.assets.instance('painted_wooden_bench')
-    bench.position.set(7.2, 0.18, 20)
-    bench.rotation.y = -Math.PI / 2
-    this.group.add(bench)
-    const hydrant = this.assets.instance('fire_hydrant')
-    hydrant.position.set(-5.4, 0.18, 10)
-    this.group.add(hydrant)
-    const bin = this.assets.instance('metal_trash_can')
-    bin.position.set(5.2, 0.18, 4)
-    this.group.add(bin)
   }
 
   update(_dt: number, t: number, player: THREE.Vector3) {
