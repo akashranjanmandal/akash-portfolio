@@ -10,7 +10,7 @@ import { PLOTS, plotToWorld, plotFrame } from './city/Plan'
 import * as THREE from 'three'
 
 export const MODELS = [
-  'avatar', 'xbot-anims', 'bike', 'car', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03', 'boulder_01',
+  'avatar', 'xbot-anims', 'bike', 'car', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
   'rollershutter_door', 'painted_wooden_bench', 'metal_trash_can', 'fire_hydrant', 'planter_box_01', 'concrete_road_barrier', 'potted_plant_01',
 ]
 export const IMAGES = ['picaku', 'lifeapp', 'pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'mastermind', 'gftd', 'agile', 'ideashapers']
@@ -60,7 +60,7 @@ export class Game {
     const home = PLOTS.find((p) => p.id === 'home')!
     const f = plotFrame(home)
     const carPos = plotToWorld(home, 6, -7)
-    const car = new Car(this.physics, this.assets.models.get('car')!, new THREE.Vector3(carPos.x, 0.2, carPos.z), f.yaw)
+    const car = new Car(this.physics, this.assets.models.get('car')!, new THREE.Vector3(carPos.x, 0.2, carPos.z), f.yaw + Math.PI) // nose out, towards the street
     this.vehicles.push(car)
     for (const [i, lx] of [-11, -12.6].entries()) {
       const p = plotToWorld(home, lx, 3)

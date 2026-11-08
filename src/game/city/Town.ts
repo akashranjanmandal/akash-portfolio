@@ -4,6 +4,7 @@ import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
 import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame } from './Plan'
 import { rng } from '../../utils/math'
+import { kerbStripes, wires, tramLine, Tram, parkedTaxis, streetLife, victoriaMemorial, cullNear } from './Kolkata'
 
 /* Roads, kerbs, pavements, street lights and the ordinary buildings
    that make the town feel lived in. Landmarks are built separately. */
@@ -32,12 +33,75 @@ export function weather(mat: THREE.MeshStandardMaterial, strength = 1) {
           float along = vWorldW.x + vWorldW.z;
           float streak = wn(vec2(along * 1.7, vWorldW.y * 0.25)) * wn(vec2(along * 0.31, 1.0));
           float blotch = wn(vec2(along * 0.08, vWorldW.y * 0.12));
-          float k = mix(1.0, ground * (1.0 - streak * 0.28) * mix(0.82, 1.06, blotch), s);
+          float mould = smoothstep(0.55, 0.85, wn(vec2(along * 0.6, vWorldW.y * 0.9))) * 0.22;
+          float k = mix(1.0, ground * (1.0 - streak * 0.42 - mould) * mix(0.74, 1.04, blotch), s);
           diffuseColor.rgb *= k;
         }`)
   }
   mat.customProgramCacheKey = () => 'weather' + strength
   return mat
+}
+
+const SIGNS: [string, string, string][] = [
+  ['SHARMA SWEETS', '#b71c1c', '#fff3c4'],
+  ['GHOSH TEA HOUSE', '#1b5e20', '#ffffff'],
+  ['BANERJEE MEDICAL HALL', '#ffffff', '#c62828'],
+  ['NEW BENGAL TAILORS', '#0d47a1', '#ffee58'],
+  ['CALCUTTA BIRYANI HOUSE', '#4e342e', '#ffcc80'],
+  ['DAS PHOTO STUDIO', '#212121', '#ffd54f'],
+  ['MAA TARA HARDWARE', '#f9a825', '#1a237e'],
+  ['COLLEGE STREET BOOKS', '#3e2723', '#fff8e1'],
+  ['PAL & SONS JEWELLERS', '#880e4f', '#ffe082'],
+  ['BOSE ELECTRICALS', '#00695c', '#ffffff'],
+  ['MITRA CYBER CAFE', '#1565c0', '#ffffff'],
+  ['ROY BROS. GROCERY', '#e65100', '#ffffff'],
+]
+
+function signAtlas() {
+  const c = document.createElement('canvas')
+  c.width = 1024
+  c.height = 128 * SIGNS.length
+  const g = c.getContext('2d')!
+  SIGNS.forEach(([text, bg, ink], i) => {
+    const y = i * 128
+    g.fillStyle = bg
+    g.fillRect(0, y, 1024, 128)
+    g.strokeStyle = ink
+    g.globalAlpha = 0.5
+    g.lineWidth = 6
+    g.strokeRect(10, y + 10, 1004, 108)
+    g.globalAlpha = 1
+    g.fillStyle = ink
+    g.font = '800 68px "Bricolage Grotesque Variable", system-ui, sans-serif'
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillText(text, 512, y + 68, 960)
+    // sun-faded paint and grime
+    for (let k = 0; k < 220; k++) {
+      g.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '40,30,20'},${Math.random() * 0.12})`
+      g.fillRect(Math.random() * 1024, y + Math.random() * 128, 2 + Math.random() * 30, 2 + Math.random() * 6)
+    }
+  })
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = 8
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 0.08 })
+}
+
+function awningMaterial() {
+  const c = document.createElement('canvas')
+  c.width = 128
+  c.height = 32
+  const g = c.getContext('2d')!
+  const cols = ['#2e7d6f', '#e8e2d0']
+  for (let i = 0; i < 8; i++) {
+    g.fillStyle = cols[i % 2]
+    g.fillRect(i * 16, 0, 16, 32)
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, side: THREE.DoubleSide })
 }
 
 export function townMaterials(a: Assets) {
@@ -46,16 +110,20 @@ export function townMaterials(a: Assets) {
   return {
     asphalt: a.material('asphalt_02', 1, { roughness: 1 }),
     pavement: a.material('concrete_tiles', 1),
-    kerb: a.material('painted_concrete', 1, { color: '#bdb7ad' }),
+    kerb: kerbStripes(),
+    signs: signAtlas(),
+    awning: awningMaterial(),
+    cloth: ['#c2185b', '#f9a825', '#1e88e5', '#43a047', '#ffffff', '#6a1b9a', '#ef6c00'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, side: THREE.DoubleSide })),
     paving: a.material('cobblestone_floor_08', 1),
     grass: a.material('aerial_grass_rock', 1),
     plaster: [
-      weather(a.material('beige_wall_001', 1, { color: '#d9be8f' })),
-      weather(a.material('white_plaster_02', 1, { color: '#cbc3b4' })),
-      weather(a.material('plastered_wall_02', 1, { color: '#c99b74' })),
-      weather(a.material('white_plaster_02', 1, { color: '#a9bfae' })),
-      weather(a.material('beige_wall_001', 1, { color: '#d6a07e' })),
-      weather(a.material('plastered_wall_02', 1, { color: '#b8b9c9' })),
+      weather(a.material('beige_wall_001', 1, { color: '#d4a85c' }), 1.2),
+      weather(a.material('white_plaster_02', 1, { color: '#c7bba4' }), 1.2),
+      weather(a.material('plastered_wall_02', 1, { color: '#c98a6a' }), 1.2),
+      weather(a.material('white_plaster_02', 1, { color: '#8fb3c2' }), 1.2),
+      weather(a.material('beige_wall_001', 1, { color: '#a9c49a' }), 1.2),
+      weather(a.material('plastered_wall_02', 1, { color: '#b5574a' }), 1.2),
+      weather(a.material('white_plaster_02', 1, { color: '#d9c7a1' }), 1.2),
     ],
     brick: weather(a.material('brick_wall_10', 1), 0.6),
     redBrick: weather(a.material('red_brick_03', 1), 0.6),
@@ -65,7 +133,7 @@ export function townMaterials(a: Assets) {
     corrugated: a.material('corrugated_iron_02', 1),
     wood: a.material('wood_planks', 1),
     granite: a.material('granite_tile', 1),
-    marble: a.material('marble_01', 1),
+    marble: a.material('marble_01', 1, { color: '#ece6da' }),
     roof: a.material('painted_concrete', 1, { color: '#a49e94' }),
     trim: weather(new THREE.MeshStandardMaterial({ color: '#d8d1c4', roughness: 0.85 })),
     frame: new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.5, metalness: 0.4 }),
@@ -123,6 +191,14 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
           b.box(2.2, 0.14, 1.0, m.trim, at(wx, y - 1.0, wz, fy).multiply(M(0, 0, 0.5)))
           b.box(2.2, 0.06, 0.06, m.rail, at(wx, y - 0.0, wz, fy).multiply(M(0, 0, 0.98)))
           for (let k = -5; k <= 5; k++) b.box(0.03, 0.9, 0.03, m.rail, at(wx, y - 0.48, wz, fy).multiply(M(k * 0.2, 0, 0.98)))
+          // washing hung out to dry
+          if (r() < 0.45) {
+            b.box(2.0, 0.015, 0.015, m.rail, at(wx, y + 0.55, wz, fy).multiply(M(0, 0, 0.9)))
+            for (let k = 0; k < 3 + Math.floor(r() * 3); k++) {
+              const cw = 0.35 + r() * 0.5
+              b.add(new THREE.PlaneGeometry(cw, 0.5 + r() * 0.6), m.cloth[Math.floor(r() * m.cloth.length)], at(wx, y + 0.25, wz, fy).multiply(M(-0.8 + k * 0.42, -r() * 0.15, 0.92)))
+            }
+          }
         }
       }
     }
@@ -131,7 +207,16 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
     // a glazed shopfront with a canopy on the street side
     b.box(w - 1, 2.8, 0.1, m.frame, at(0, 1.5, d / 2 + 0.02))
     b.add(new THREE.PlaneGeometry(w - 1.4, 2.5), m.glassLit, at(0, 1.5, d / 2 + 0.08))
-    b.box(w, 0.18, 1.6, m.frame, at(0, 3.1, d / 2 + 0.8))
+    // a hand-painted signboard and a faded canvas awning
+    const sw = Math.min(w - 0.6, 9)
+    const sign = new THREE.PlaneGeometry(sw, 1.05)
+    const row = Math.floor(r() * SIGNS.length)
+    const uv = sign.attributes.uv as THREE.BufferAttribute
+    for (let i = 0; i < uv.count; i++) uv.setY(i, (SIGNS.length - 1 - row + uv.getY(i)) / SIGNS.length)
+    b.add(sign, m.signs, at(0, 3.75, d / 2 + 0.12))
+    b.box(sw + 0.2, 1.2, 0.1, m.frame, at(0, 3.75, d / 2 + 0.05))
+    const awn = new THREE.Matrix4().makeRotationX(0.42)
+    b.box(w - 0.4, 0.04, 1.8, m.awning, at(0, 2.95, d / 2 + 0.85).multiply(awn), 1.2)
   }
   // roof clutter: water tanks and a stair head
   const tanks = 1 + Math.floor(r() * 2)
@@ -151,13 +236,29 @@ export class Town {
     this.mats = townMaterials(assets)
   }
 
+  tram: Tram | null = null
+  private taxis: THREE.Object3D[] = []
+
+  update(dt: number, p: THREE.Vector3) {
+    this.tram?.update(dt)
+    cullNear(this.taxis, p)
+  }
+
   build() {
     const b = new Batch()
     this.roads(b)
     this.blocks(b)
     this.fillers(b)
+    tramLine(b)
+    streetLife(b, this.mats, this.physics)
+    victoriaMemorial(b, this.mats, this.physics)
     b.build(this.group)
+    const car = this.assets.models.get('car')
+    if (car) this.taxis = parkedTaxis(this.group, this.physics, car)
     this.lamps()
+    this.group.add(wires(this.lampPositions))
+    this.tram = new Tram(this.physics)
+    this.group.add(this.tram.group)
   }
 
   private roads(b: Batch) {
@@ -203,8 +304,9 @@ export class Town {
         const cz = (GRID[j] + GRID[j + 1]) / 2
         // pavement ring + kerb, then the block interior
         b.box(size, CURB, size, m.pavement, M(cx, CURB / 2, cz), 2)
-        for (const [dx, dz, w, d] of [[0, size / 2, size + 0.3, 0.3], [0, -size / 2, size + 0.3, 0.3], [size / 2, 0, 0.3, size], [-size / 2, 0, 0.3, size]]) {
-          b.box(w, CURB + 0.02, d, m.kerb, M(cx + dx, (CURB + 0.02) / 2, cz + dz), 1)
+        // kerbs are always built along their local x so the stripes run the right way
+        for (const [dx, dz, yaw] of [[0, size / 2, 0], [0, -size / 2, 0], [size / 2, 0, Math.PI / 2], [-size / 2, 0, Math.PI / 2]]) {
+          b.box(size + 0.3, CURB + 0.02, 0.3, m.kerb, M(cx + dx, (CURB + 0.02) / 2, cz + dz, yaw), 1)
         }
         const inner = size - WALK_W * 2
         b.box(inner, 0.02, inner, m.grass, M(cx, CURB + 0.01, cz), 6)

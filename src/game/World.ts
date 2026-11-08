@@ -202,6 +202,22 @@ export class World {
     const trees2 = pick(Math.round(160 * d), offRoad, 2.4)
     const tree1 = this.assets.models.get('island_tree_01')?.scene
     const tree2 = this.assets.models.get('island_tree_02')?.scene
+    // shade trees along the pavements, between the lamps — Kolkata's avenues are green tunnels
+    const avenue: THREE.Matrix4[] = []
+    const kerb = 50 - 5 - 1.0
+    for (const cx of [-150, -50, 50, 150]) {
+      for (const cz of [-150, -50, 50, 150]) {
+        for (const t of [-23, 23]) {
+          for (const [px, pz] of [[cx + t, cz + kerb], [cx + t, cz - kerb], [cx + kerb, cz + t], [cx - kerb, cz + t]]) {
+            if (r() < 0.45) continue
+            if (plots.some((p) => (p.x - px) ** 2 + (p.z - pz) ** 2 < (p.r + 2) ** 2)) continue
+            const s = 1.05 + r() * 0.25
+            avenue.push(new THREE.Matrix4().compose(new THREE.Vector3(px, 0.15, pz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * 6.28), new THREE.Vector3(s, s * 1.3, s)))
+          }
+        }
+      }
+    }
+    trees1.push(...avenue)
     if (tree1 && tree2) {
       this.forest = new Forest(this.renderer, this.scene.environment, [tree1, tree2], [
         ...trees1.map((matrix) => ({ model: 0, matrix })),
@@ -215,14 +231,12 @@ export class World {
     }
     const shrubs = pick(Math.round(420 * d), offRoad, 1.4)
     const shrub = this.assets.models.get('shrub_01')?.scene
-    if (shrub) instanceModel(this.group, shrub, shrubs)
-    const rocks = pick(Math.round(60 * d), offRoad)
-    const boulder = this.assets.models.get('boulder_01')?.scene
-    if (boulder) instanceModel(this.group, boulder, rocks)
+    if (shrub) instanceModel(this.group, shrub, shrubs, false)
 
   }
 
-  update(_dt: number, t: number, player: THREE.Vector3) {
+  update(dt: number, t: number, player: THREE.Vector3) {
+    this.town.update(dt, player)
     this.forest?.update(player)
     this.landmarks.update(t, 0)
     const n = (this.sea.material as THREE.MeshStandardMaterial).normalMap

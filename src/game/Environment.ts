@@ -25,8 +25,9 @@ export class Environment {
       s.material.fragmentShader = s.material.fragmentShader.replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( min( texColor * 0.42, vec3( 1.6 ) ), 1.0 );')
       s.material.needsUpdate = true
       const u = s.material.uniforms
-      u.turbidity.value = 4.5
-      u.rayleigh.value = 1.6
+      // humid Bengal air: hazier, warmer sky
+      u.turbidity.value = 7
+      u.rayleigh.value = 1.9
       u.mieCoefficient.value = 0.004
       u.mieDirectionalG.value = 0.82
     }
@@ -45,9 +46,9 @@ export class Environment {
     this.sun.shadow.radius = 2
     this.scene.add(this.sun, this.sun.target, this.hemi)
 
-    this.scene.fog = new THREE.FogExp2('#c9d8e6', 0.00042)
+    this.scene.fog = new THREE.FogExp2('#d8cdb8', 0.0009)
     this.pmrem = new THREE.PMREMGenerator(renderer)
-    this.setSun(32, 135)
+    this.setSun(28, 235)
   }
 
   /** elevation and azimuth in degrees */
@@ -60,7 +61,8 @@ export class Environment {
     const low = THREE.MathUtils.clamp(elevation / 25, 0, 1)
     this.sun.color.setRGB(1, 0.78 + low * 0.18, 0.6 + low * 0.32)
     this.sun.intensity = 0.8 + low * 1.9
-    ;(this.scene.fog as THREE.FogExp2).color.setRGB(0.62 + (1 - low) * 0.2, 0.7 - (1 - low) * 0.04, 0.8 - (1 - low) * 0.2)
+    // warm dusty haze close to the ground, the way Kolkata afternoons look
+    ;(this.scene.fog as THREE.FogExp2).color.setRGB(0.78, 0.72 - (1 - low) * 0.05, 0.62 - (1 - low) * 0.12)
     this.envTarget?.dispose()
     this.envTarget = this.pmrem.fromScene(this.envScene, 0.02)
     this.scene.environment = this.envTarget.texture

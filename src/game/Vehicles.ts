@@ -99,7 +99,8 @@ export class Car {
     const r = this.body.rotation()
     this.prevP.set(t.x, t.y, t.z)
     this.prevQ.set(r.x, r.y, r.z, r.w)
-    const speed = this.ctrl.currentVehicleSpeed()
+    // the controller measures along +Z, but the car's nose points along -Z
+    const speed = -this.ctrl.currentVehicleSpeed()
     this.speed = speed
     let engine = 0
     let brake = 0
@@ -120,7 +121,7 @@ export class Car {
     } else brake = 30
     this.steer = damp(this.steer, steerTarget, 8, dt)
     for (const i of [0, 1]) this.ctrl.setWheelSteering(i, this.steer)
-    for (const i of [2, 3]) this.ctrl.setWheelEngineForce(i, engine)
+    for (const i of [2, 3]) this.ctrl.setWheelEngineForce(i, -engine)
     for (let i = 0; i < 4; i++) this.ctrl.setWheelBrake(i, brake)
     this.ctrl.updateVehicle(dt)
     const t2 = this.body.translation()
