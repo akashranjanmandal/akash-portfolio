@@ -6,7 +6,7 @@ import * as THREE from 'three'
    an offset that first aligns the target's rest direction with the
    source's, then each frame: targetModel = sourceModel × offset. */
 
-type Pair = { src: THREE.Object3D; dst: THREE.Object3D; offset: THREE.Quaternion; parent: Pair | null }
+type Pair = { src: THREE.Object3D; dst: THREE.Object3D; offset: THREE.Quaternion; parent: Pair | null; restModel: THREE.Quaternion; restDir: THREE.Vector3 | null }
 
 const qa = new THREE.Quaternion()
 const qb = new THREE.Quaternion()
@@ -56,7 +56,7 @@ export class Retargeter {
       if (!(dst as THREE.Bone).isBone) return
       const src = srcRoot.getObjectByName('mixamorig' + dst.name)
       if (!src) return
-      byName.set(dst.name, { src, dst, offset: new THREE.Quaternion(), parent: null })
+      byName.set(dst.name, { src, dst, offset: new THREE.Quaternion(), parent: null, restModel: new THREE.Quaternion(), restDir: null })
     })
     for (const p of byName.values()) {
       let o = p.dst.parent
@@ -76,6 +76,9 @@ export class Retargeter {
     for (const p of this.pairs) {
       const srcRest = modelQuat(p.src, srcRoot, new THREE.Quaternion())
       const dstRest = modelQuat(p.dst, dstRoot, new THREE.Quaternion())
+      p.restModel.copy(dstRest)
+      const firstChild = p.dst.children.find((c) => (c as THREE.Bone).isBone)
+      if (firstChild) p.restDir = modelPos(firstChild, dstRoot, new THREE.Vector3()).sub(modelPos(p.dst, dstRoot, new THREE.Vector3())).normalize()
       // align rest directions using the first child bone
       const childDst = p.dst.children.find((c) => (c as THREE.Bone).isBone)
       const childSrc = childDst ? srcRoot.getObjectByName('mixamorig' + childDst.name) : undefined
@@ -99,6 +102,23 @@ export class Retargeter {
   }
 
   readonly clips: THREE.AnimationAction[]
+
+  /** override bones so each points along a model-space direction (applied after update) */
+  aim(dirs: Record<string, THREE.Vector3>) {
+    const model = new Map<Pair, THREE.Quaternion>()
+    for (const p of this.pairs) {
+      const parentModel = p.parent ? model.get(p.parent)! : modelQuat(p.dst.parent!, this.dstRoot, new THREE.Quaternion())
+      const d = dirs[p.dst.name]
+      if (d && p.restDir) {
+        // rotate the rest orientation so the rest direction swings onto d
+        const want = new THREE.Quaternion().setFromUnitVectors(p.restDir, d.clone().normalize()).multiply(p.restModel)
+        p.dst.quaternion.copy(parentModel).invert().multiply(want)
+        model.set(p, want)
+      } else {
+        model.set(p, parentModel.clone().multiply(p.dst.quaternion))
+      }
+    }
+  }
 
   update(dt: number) {
     this.mixer.update(dt)

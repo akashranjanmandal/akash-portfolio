@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
 import { Retargeter } from './Retarget'
+import type { Vehicle } from './Vehicles'
 import { RAPIER, type Physics } from './Physics'
 import type { Input } from './Input'
 import { damp, angleDelta, clamp } from '../utils/math'
@@ -34,6 +35,10 @@ export class Player {
   private readonly prev = new THREE.Vector3()
   private readonly curr = new THREE.Vector3()
   private head: THREE.Object3D | null
+  /** vehicle being driven or ridden */
+  vehicle: Vehicle | null = null
+  private pedal = 0
+  private lastLook = 0
 
   constructor(private physics: Physics, avatarGltf: GLTF, animGltf: GLTF, spawn: THREE.Vector3) {
     this.avatar = avatarGltf.scene
@@ -112,8 +117,32 @@ export class Player {
     this.collider.setEnabled(on)
   }
 
+  /** get on / in a vehicle */
+  mount(v: Vehicle) {
+    this.vehicle = v
+    v.occupied = true
+    this.collider.setEnabled(false)
+    if (v.kind === 'car') this.root.visible = false
+    else (v as import('./Vehicles').Bike).setCollision(false)
+  }
+
+  /** step off at the vehicle's exit point */
+  dismount() {
+    const v = this.vehicle
+    if (!v) return
+    v.occupied = false
+    if (v.kind === 'bike') (v as import('./Vehicles').Bike).setCollision(true)
+    const exit = v.exit.clone().applyQuaternion(v.root.quaternion).add(v.position)
+    this.vehicle = null
+    this.root.visible = true
+    this.collider.setEnabled(true)
+    this.teleport(new THREE.Vector3(exit.x, v.position.y + 0.2, exit.z), this.yaw)
+    this.facing = v.yaw
+  }
+
   /** mouse / touch look */
   look(dx: number, dy: number) {
+    if (dx || dy) this.lastLook = performance.now()
     this.yaw -= dx * 0.0024
     this.pitch = clamp(this.pitch - dy * 0.0022, -1.25, 0.95)
   }
@@ -166,6 +195,7 @@ export class Player {
   /** visuals + animation, every frame */
   update(dt: number, alpha: number) {
     if (!this.active) return
+    if (this.vehicle) return this.updateRiding(dt)
     this.tmp.lerpVectors(this.prev, this.curr, alpha)
     this.root.position.set(this.tmp.x, this.tmp.y - HALF - RADIUS, this.tmp.z)
     this.root.rotation.y = this.facing
@@ -185,6 +215,59 @@ export class Player {
     set('walk', wWalk, clamp(s / 1.6, 0.6, 1.6))
     set('run', wRun, clamp(s / 4.2, 0.8, 1.5))
     this.rig.update(dt)
+  }
+
+  private updateRiding(dt: number) {
+    const v = this.vehicle!
+    if (v.kind === 'car') return
+    // sit on the saddle, follow the bike exactly
+    const seat = v.seat.clone().applyQuaternion(v.root.quaternion).add(v.position)
+    this.root.position.copy(seat).setY(seat.y - 1.0)
+    this.root.quaternion.copy(v.root.quaternion)
+    this.facing = v.yaw
+    for (const n of ['idle', 'walk', 'run']) this.actions[n]?.setEffectiveWeight(n === 'idle' ? 1 : 0)
+    this.rig.update(dt)
+    this.pedal += v.speed * dt * 1.6
+    const s = Math.sin(this.pedal)
+    const c = Math.cos(this.pedal)
+    const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z)
+    this.rig.aim({
+      Spine: V(0, 0.82, 0.42),
+      Spine1: V(0, 0.8, 0.5),
+      Spine2: V(0, 0.78, 0.55),
+      LeftUpLeg: V(0.12, -0.5 + s * 0.22, 0.85 + c * 0.15),
+      RightUpLeg: V(-0.12, -0.5 - s * 0.22, 0.85 - c * 0.15),
+      LeftLeg: V(0.03, -1, -0.2 + s * 0.25),
+      RightLeg: V(-0.03, -1, -0.2 - s * 0.25),
+      LeftArm: V(0.3, -0.45, 0.85),
+      RightArm: V(-0.3, -0.45, 0.85),
+      LeftForeArm: V(0.05, -0.35, 1),
+      RightForeArm: V(-0.05, -0.35, 1),
+    })
+  }
+
+  /** orbit camera around a vehicle; drifts back behind it while moving */
+  placeVehicleCamera(cam: THREE.PerspectiveCamera, dt: number) {
+    const v = this.vehicle!
+    const moving = Math.abs(v.speed) > 1.5
+    if (moving && performance.now() - this.lastLook > 1600) {
+      const behind = v.yaw + Math.PI
+      this.yaw += angleDelta(this.yaw, behind) * (1 - Math.exp(-2.5 * dt))
+      this.pitch = damp(this.pitch, -0.18, 2, dt)
+    }
+    const car = v.kind === 'car'
+    const pivot = this.tmp.copy(v.position)
+    pivot.y += car ? 1.4 : 1.6
+    const back = new THREE.Vector3(Math.sin(this.yaw) * Math.cos(this.pitch), -Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch))
+    const want = car ? 7 : 4.2
+    const ray = new RAPIER.Ray({ x: pivot.x, y: pivot.y, z: pivot.z }, { x: back.x, y: back.y, z: back.z })
+    const hit = this.physics.world.castRay(ray, want + 0.3, true, undefined, undefined, undefined, car ? (v as import('./Vehicles').Car).body : undefined)
+    const target = hit ? Math.max(1.2, hit.timeOfImpact - 0.3) : want
+    this.camDist = target < this.camDist ? target : damp(this.camDist, target, 3, dt)
+    cam.layers.enable(HEAD_LAYER)
+    cam.position.copy(pivot).addScaledVector(back, this.camDist)
+    if (cam.position.y < v.position.y + 0.4) cam.position.y = v.position.y + 0.4
+    cam.rotation.set(this.pitch, this.yaw, 0, 'YXZ')
   }
 
   /** position the camera for the current view */
