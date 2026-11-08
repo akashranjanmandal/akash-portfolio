@@ -11,6 +11,8 @@ export type PBR = { map: THREE.Texture; normalMap?: THREE.Texture; roughnessMap?
 export class Assets {
   readonly models = new Map<string, GLTF>()
   readonly textures = new Map<string, PBR>()
+  /** plain images used on signs and screens, keyed by their public path */
+  readonly images = new Map<string, THREE.Texture>()
   private gltf = new GLTFLoader()
   private tex = new THREE.TextureLoader()
   private done = 0
@@ -26,9 +28,21 @@ export class Assets {
     this.onProgress(this.total ? this.done / this.total : 1)
   }
 
-  async load(models: string[], textures: string[]) {
-    this.total = models.length + textures.length * 3
+  async load(models: string[], textures: string[], images: string[] = []) {
+    this.total = models.length + textures.length * 3 + images.length
+    const root = import.meta.env.DEV ? '/' : ''
     await Promise.all([
+      ...images.map(async (path) => {
+        try {
+          const t = await this.tex.loadAsync(root + path)
+          t.colorSpace = THREE.SRGBColorSpace
+          t.anisotropy = this.maxAniso
+          this.images.set(path, t)
+        } catch {
+          /* a missing screenshot just leaves the screen dark */
+        }
+        this.tick()
+      }),
       ...models.map(async (name) => {
         try {
           this.models.set(name, await this.gltf.loadAsync(`${BASE}models/${name}.glb`))

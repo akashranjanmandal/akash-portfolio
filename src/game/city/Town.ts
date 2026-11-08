@@ -41,7 +41,7 @@ export function weather(mat: THREE.MeshStandardMaterial, strength = 1) {
 }
 
 export function townMaterials(a: Assets) {
-  const glass = new THREE.MeshStandardMaterial({ color: '#1c2833', metalness: 0.9, roughness: 0.06 })
+  const glass = new THREE.MeshStandardMaterial({ color: '#5d7488', metalness: 0.95, roughness: 0.04, envMapIntensity: 1.6 })
   const glassLit = new THREE.MeshStandardMaterial({ color: '#2a2a2a', metalness: 0.4, roughness: 0.2, emissive: '#ffd59a', emissiveIntensity: 0 })
   return {
     asphalt: a.material('asphalt_02', 1, { roughness: 1 }),
@@ -259,7 +259,7 @@ export class Town {
       for (let j = 0; j < GRID.length - 1; j++) {
         const cx = (GRID[i] + GRID[i + 1]) / 2
         const cz = (GRID[j] + GRID[j + 1]) / 2
-        for (const t of [-30, 0, 30]) {
+        for (const t of [-34, -12, 12, 34]) {
           for (const [px, pz, yaw] of [[cx + t, cz + edge, 0], [cx + t, cz - edge, Math.PI], [cx + edge, cz + t, Math.PI / 2], [cx - edge, cz + t, -Math.PI / 2]] as const) {
             mats.push(M(px, CURB, pz, yaw, 1.6, 1.6, 1.6))
             this.lampPositions.push(new THREE.Vector3(px, 0, pz))

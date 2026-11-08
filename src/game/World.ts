@@ -5,6 +5,7 @@ import type { Quality } from './Engine'
 import { noise2, rng } from '../utils/math'
 import { Forest } from './Foliage'
 import { Town } from './city/Town'
+import { Landmarks } from './city/Landmarks'
 import { PLOTS, plotFrame, SPAWN } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ export class World {
   private sea!: THREE.Mesh
   forest: Forest | null = null
   town!: Town
+  landmarks!: Landmarks
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer, private physics: Physics, private assets: Assets, private quality: Quality) {
     scene.add(this.group)
@@ -82,6 +84,9 @@ export class World {
     this.town = new Town(this.physics, this.assets)
     this.town.build()
     this.group.add(this.town.group)
+    this.landmarks = new Landmarks(this.physics, this.town.mats, this.assets.images)
+    this.landmarks.build()
+    this.group.add(this.landmarks.group)
     this.scatter()
   }
 
@@ -219,6 +224,7 @@ export class World {
 
   update(_dt: number, t: number, player: THREE.Vector3) {
     this.forest?.update(player)
+    this.landmarks.update(t, 0)
     const n = (this.sea.material as THREE.MeshStandardMaterial).normalMap
     if (n) n.offset.set(t * 0.002, t * 0.0014)
   }

@@ -22,7 +22,7 @@ export class Environment {
     this.envScene.add(this.envSky)
     for (const s of [this.sky, this.envSky]) {
       // Sky outputs scene-referred radiance meant for exposure ~0.5; bake that in
-      s.material.fragmentShader = s.material.fragmentShader.replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( texColor * 0.42, 1.0 );')
+      s.material.fragmentShader = s.material.fragmentShader.replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( min( texColor * 0.42, vec3( 1.6 ) ), 1.0 );')
       s.material.needsUpdate = true
       const u = s.material.uniforms
       u.turbidity.value = 4.5

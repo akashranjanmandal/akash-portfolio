@@ -62,7 +62,7 @@ export class Engine {
       this.composer.addPass(this.ao)
     }
     const effects = []
-    if (this.quality.bloom) effects.push(new BloomEffect({ intensity: 0.55, luminanceThreshold: 0.92, luminanceSmoothing: 0.2, mipmapBlur: true }))
+    if (this.quality.bloom) effects.push(new BloomEffect({ intensity: 0.35, luminanceThreshold: 1.05, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.6 }))
     effects.push(new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }))
     effects.push(new VignetteEffect({ offset: 0.4, darkness: 0.28 }))
     effects.push(new SMAAEffect())

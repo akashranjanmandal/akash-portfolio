@@ -13,6 +13,9 @@ export const MODELS = [
   'avatar', 'xbot-anims', 'bike', 'car', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03', 'boulder_01',
   'rollershutter_door', 'painted_wooden_bench', 'metal_trash_can', 'fire_hydrant', 'planter_box_01', 'concrete_road_barrier', 'potted_plant_01',
 ]
+export const IMAGES = ['picaku', 'lifeapp', 'pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'mastermind', 'gftd', 'agile', 'ideashapers']
+  .map((s) => `img/tex/${s}.webp`)
+  .concat(['pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'gftd', 'agile'].map((s) => `img/logos/${s}.webp`))
 export const TEXTURES = ['aerial_grass_rock', 'asphalt_02', 'concrete_tiles', 'red_brick_03', 'plastered_wall_02', 'coast_sand_rocks_02', 'forrest_ground_01', 'metal_plate', 'rocky_terrain_02']
 
 /** The open-world game: loads everything, then runs player / vehicles / camera each frame. */
@@ -37,7 +40,7 @@ export class Game {
     await this.physics.init()
     this.env = new Environment(this.engine.renderer, this.engine.scene, this.engine.quality.shadowSize, this.engine.quality.shadows)
     this.assets = new Assets((p) => onProgress(p * 0.85), this.engine.renderer, this.engine.renderer.capabilities.getMaxAnisotropy())
-    await this.assets.load(MODELS, TEXTURES)
+    await this.assets.load(MODELS, TEXTURES, IMAGES)
     this.world = new World(this.engine.scene, this.engine.renderer, this.physics, this.assets, this.engine.quality)
     this.world.build()
     onProgress(0.92)
