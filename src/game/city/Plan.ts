@@ -70,6 +70,7 @@ export function plotToWorld(p: Plot, lx: number, lz: number) {
 
 export const SPAWN = (() => {
   const home = PLOTS[0]
-  const p = plotToWorld(home, -6, 6)
-  return { x: p.x, z: p.z, yaw: Math.PI } // looking north, away from the garage
+  const p = plotToWorld(home, 2, 12)
+  // standing across the pavement, looking at the house and the open garage
+  return { x: p.x, z: p.z, yaw: Math.PI - 0.25 }
 })()

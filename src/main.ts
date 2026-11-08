@@ -3,11 +3,11 @@ import '@fontsource/instrument-serif/400.css'
 import '@fontsource/instrument-serif/400-italic.css'
 import '@fontsource-variable/jetbrains-mono'
 import './styles/main.css'
-import { App } from './App'
+import { GameApp } from './GameApp'
 
-const app = new App()
+const app = new GameApp()
 if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
-  ;(window as unknown as { __app: App }).__app = app
+  ;(window as unknown as { __app: GameApp }).__app = app
 }
 app.boot().catch((err) => {
   console.error(err)
