@@ -497,9 +497,9 @@ export function ambassador(): Ambassador {
       group.add(merged)
     }
   }
+  parts.beams.visible = false
   merge(parts.root, parts.beams)
   for (const h of wrap.children) if (h !== parts.root) merge(h)
-  const beamMat = parts.beams.material as THREE.MeshBasicMaterial
   return {
     model: wrap,
     parts,
@@ -508,8 +508,8 @@ export function ambassador(): Ambassador {
       parts.headlightMaterial.emissiveIntensity = 0.2 + lit * 4
       parts.tailMaterial.emissiveIntensity = (braking ? 2.5 : 0.25) + lit * 1.5
       parts.lampMaterial.emissiveIntensity = 0.3 + lit * 2.5
-      beamMat.opacity = lit * 0.14
-      parts.beams.visible = lit > 0
+      // the light itself comes from real spotlights / emissive lamps; the old cone mesh stays hidden
+      parts.beams.visible = false
     },
   }
 }
