@@ -301,7 +301,7 @@ export class Town {
     this.lamps()
     this.buildPools()
     this.group.add(wires(this.lampPositions))
-    this.tram = new Tram(this.physics)
+    this.tram = new Tram(this.physics, this.assets.models.get('tram')?.scene)
     this.group.add(this.tram.group)
   }
 

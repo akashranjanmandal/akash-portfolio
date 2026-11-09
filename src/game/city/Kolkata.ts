@@ -123,8 +123,8 @@ function tramGlow() {
 }
 
 export class Tram {
-  private side!: THREE.MeshStandardMaterial
-  private lamp!: THREE.Mesh
+  private side?: THREE.MeshStandardMaterial
+  private lamp?: THREE.Mesh
   readonly group = new THREE.Group()
   private body: RAPIER.RigidBody
   private z = -170
@@ -135,7 +135,18 @@ export class Tram {
   static readonly Z1 = 190
   onBell?: (pos: THREE.Vector3) => void
 
-  constructor(physics: Physics) {
+  private glass: THREE.MeshStandardMaterial[] = []
+  private half = { x: 1.2, y: 1.5, z: 6 }
+
+  /** with a model: the real "Rejuvenating Tram for Kolkata"; without: a simple blue-and-cream car */
+  constructor(physics: Physics, model?: THREE.Object3D) {
+    if (model) {
+      this.useModel(model)
+      this.group.position.set(this.x, 0.06, this.z)
+      this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(this.x, this.half.y, this.z))
+      physics.world.createCollider(RAPIER.ColliderDesc.cuboid(this.half.x, this.half.y, this.half.z), this.body)
+      return
+    }
     const tex = tramTexture()
     const side = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, emissiveMap: tramGlow(), emissive: '#ffffff', emissiveIntensity: 0 })
     this.side = side
@@ -179,9 +190,46 @@ export class Tram {
     physics.world.createCollider(RAPIER.ColliderDesc.cuboid(W / 2, 1.5, L / 2), this.body)
   }
 
+  private useModel(src: THREE.Object3D) {
+    const m = src.clone(true)
+    // the overhead wires are baked into the model; they'd travel with the tram, so they go
+    m.getObjectByName('Object_43')?.removeFromParent()
+    m.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      const mat = mesh.material as THREE.MeshStandardMaterial
+      if (/glass/i.test(mat.name)) {
+        const g = mat.clone()
+        g.emissive = new THREE.Color('#ffd9a0')
+        g.emissiveIntensity = 0
+        mesh.material = g
+        this.glass.push(g)
+      }
+    })
+    m.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(m)
+    const size = box.getSize(new THREE.Vector3())
+    const centre = box.getCenter(new THREE.Vector3())
+    // scale to a real tram: 2.6 m wide (the model's width is its shortest horizontal side)
+    const s = 2.6 / Math.min(size.x, size.z)
+    const inner = new THREE.Group()
+    inner.add(m)
+    m.position.set(-centre.x, -box.min.y, -centre.z)
+    inner.scale.setScalar(s)
+    // run along the track (z): turn the long side onto z
+    if (size.x > size.z) inner.rotation.y = Math.PI / 2
+    this.group.add(inner)
+    const long = Math.max(size.x, size.z) * s
+    this.half = { x: 1.3, y: (size.y * s) / 2, z: long / 2 }
+  }
+
   setNight(n: number) {
+    for (const g of this.glass) g.emissiveIntensity = n > 0.3 ? 0.9 * n : 0
+    if (!this.side) return
     this.side.emissiveIntensity = n > 0.3 ? 1.6 * n : 0
-    ;(this.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + (n > 0.3 ? 6 * n : 0)
+    ;(this.lamp!.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + (n > 0.3 ? 6 * n : 0)
   }
 
   update(dt: number) {
@@ -197,7 +245,7 @@ export class Tram {
       this.onBell?.(this.group.position)
     }
     this.group.position.z = this.z
-    this.body.setNextKinematicTranslation({ x: this.x, y: 1.9, z: this.z })
+    this.body.setNextKinematicTranslation({ x: this.x, y: this.half.y, z: this.z })
   }
 }
 

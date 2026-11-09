@@ -10,7 +10,7 @@ import { PLOTS, plotToWorld, plotFrame } from './city/Plan'
 import * as THREE from 'three'
 
 export const MODELS = [
-  'avatar', 'xbot-anims', 'bike', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
+  'avatar', 'xbot-anims', 'bike', 'tram', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
   'rollershutter_door', 'painted_wooden_bench', 'metal_trash_can', 'fire_hydrant', 'planter_box_01', 'concrete_road_barrier', 'potted_plant_01',
 ]
 export const IMAGES = ['picaku', 'lifeapp', 'pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'mastermind', 'gftd', 'agile', 'ideashapers']
