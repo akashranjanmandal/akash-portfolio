@@ -10,7 +10,7 @@ import { PLOTS, plotToWorld, plotFrame } from './city/Plan'
 import * as THREE from 'three'
 
 export const MODELS = [
-  'avatar', 'xbot-anims', 'bike', 'car', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
+  'avatar', 'xbot-anims', 'bike', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
   'rollershutter_door', 'painted_wooden_bench', 'metal_trash_can', 'fire_hydrant', 'planter_box_01', 'concrete_road_barrier', 'potted_plant_01',
 ]
 export const IMAGES = ['picaku', 'lifeapp', 'pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'mastermind', 'gftd', 'agile', 'ideashapers']
@@ -60,7 +60,7 @@ export class Game {
     const home = PLOTS.find((p) => p.id === 'home')!
     const f = plotFrame(home)
     const carPos = plotToWorld(home, 6, -7)
-    const car = new Car(this.physics, this.assets.models.get('car')!, new THREE.Vector3(carPos.x, 0.2, carPos.z), f.yaw + Math.PI) // nose out, towards the street
+    const car = new Car(this.physics, new THREE.Vector3(carPos.x, 0.2, carPos.z), f.yaw + Math.PI) // nose out, towards the street
     this.vehicles.push(car)
     for (const [i, lx] of [-11, -12.6].entries()) {
       const p = plotToWorld(home, lx, 3)
@@ -68,6 +68,7 @@ export class Game {
       this.vehicles.push(bike)
     }
     for (const v of this.vehicles) this.engine.scene.add(v.root)
+    this.world.obstacles = this.vehicles.map((v) => v.position)
   }
 
   start() {
@@ -107,6 +108,8 @@ export class Game {
     else p.placeCamera(this.engine.camera, dt)
     const focus = p.vehicle ? p.vehicle.position : p.position
     this.env.follow(focus)
+    this.world.night = this.env.night
+    for (const v of this.vehicles) if (v.kind === 'car') (v as Car).setLights(this.env.night)
     this.world.update(dt, t, focus)
   }
 }

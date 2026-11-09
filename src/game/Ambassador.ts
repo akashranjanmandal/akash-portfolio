@@ -1,6 +1,27 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import { canvas, toTexture, FONT } from '../textures'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
+
+function canvas(w: number, h: number) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const g = c.getContext('2d')!
+  return { c, g }
+}
+function toTexture(c: HTMLCanvasElement, opts: { srgb?: boolean; repeat?: boolean; aniso?: number } = {}) {
+  const t = new THREE.CanvasTexture(c)
+  if (opts.srgb !== false) t.colorSpace = THREE.SRGBColorSpace
+  if (opts.repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping
+  t.anisotropy = opts.aniso ?? 4
+  return t
+}
+const FONT = {
+  display: '"Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif',
+  mono: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace',
+  serif: '"Instrument Serif", Georgia, serif',
+}
+
 
 /* ──────────────────────────────────────────────────────────────
    THE TAXI
@@ -421,4 +442,74 @@ function beamTexture() {
   g.fillStyle = grd
   g.fillRect(0, 0, 64, 256)
   return toTexture(c, { srgb: false })
+}
+
+export type Ambassador = { model: THREE.Group; parts: TaxiParts; setNight: (n: number, braking?: boolean) => void }
+
+/**
+ * A full-size Ambassador (4.3 m) facing -Z, with its wheels re-parented into
+ * holders named like the vehicle code expects (wheel_fl, wheel_fr, wheel_rl, wheel_rr).
+ */
+export function ambassador(): Ambassador {
+  const S = 1.5
+  const parts = buildTaxi(null)
+  const wrap = new THREE.Group()
+  parts.root.rotation.y = Math.PI
+  parts.root.scale.setScalar(S)
+  wrap.add(parts.root)
+  parts.root.updateMatrix()
+  const names = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']
+  parts.wheels.forEach((w, i) => {
+    const p = w.position.clone().applyMatrix4(parts.root.matrix)
+    parts.root.remove(w)
+    const holder = new THREE.Group()
+    holder.name = names[i]
+    holder.position.copy(p)
+    w.position.set(0, 0, 0)
+    w.rotation.set(0, Math.PI, 0)
+    w.scale.setScalar(S)
+    holder.add(w)
+    wrap.add(holder)
+  })
+  // collapse the dozens of little parts into one mesh per material (draw calls matter: there are many taxis)
+  const merge = (group: THREE.Object3D, skip?: THREE.Object3D) => {
+    group.updateMatrixWorld(true)
+    const inv = group.matrixWorld.clone().invert()
+    const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>()
+    const remove: THREE.Mesh[] = []
+    group.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (!m.isMesh || o === skip) return
+      const g = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld))
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k)
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2))
+      const mat = m.material as THREE.Material
+      let list = byMat.get(mat)
+      if (!list) byMat.set(mat, (list = []))
+      list.push(g)
+      remove.push(m)
+    })
+    for (const m of remove) m.removeFromParent()
+    for (const [mat, list] of byMat) {
+      const merged = new THREE.Mesh(mergeGeometries(list)!, mat)
+      merged.castShadow = true
+      merged.receiveShadow = true
+      group.add(merged)
+    }
+  }
+  merge(parts.root, parts.beams)
+  for (const h of wrap.children) if (h !== parts.root) merge(h)
+  const beamMat = parts.beams.material as THREE.MeshBasicMaterial
+  return {
+    model: wrap,
+    parts,
+    setNight(n: number, braking = false) {
+      const lit = n > 0.3 ? n : 0
+      parts.headlightMaterial.emissiveIntensity = 0.2 + lit * 4
+      parts.tailMaterial.emissiveIntensity = (braking ? 2.5 : 0.25) + lit * 1.5
+      parts.lampMaterial.emissiveIntensity = 0.3 + lit * 2.5
+      beamMat.opacity = lit * 0.14
+      parts.beams.visible = lit > 0
+    },
+  }
 }

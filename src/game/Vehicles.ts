@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
+import { ambassador, type Ambassador } from './Ambassador'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RAPIER, type Physics } from './Physics'
 import type { Input } from './Input'
@@ -18,30 +19,34 @@ export class Car {
   private wheelBase: THREE.Vector3[] = []
   private steer = 0
   speed = 0
+  braking = false
   occupied = false
   private readonly prevP = new THREE.Vector3()
   private readonly currP = new THREE.Vector3()
   private readonly prevQ = new THREE.Quaternion()
   private readonly currQ = new THREE.Quaternion()
   readonly seat = new THREE.Vector3(-0.35, 0.55, 0.1)
+  private beams: THREE.SpotLight[] = []
   /** where the driver steps out (car-local) */
   readonly exit = new THREE.Vector3(-1.9, 0, 0.2)
 
-  constructor(physics: Physics, gltf: GLTF, pos: THREE.Vector3, yaw: number) {
-    const model = gltf.scene.clone(true)
-    model.traverse((o) => {
-      const m = o as THREE.Mesh
-      if (!m.isMesh) return
-      m.castShadow = true
-      m.receiveShadow = true
-      const mat = m.material as THREE.MeshStandardMaterial
-      if (mat?.name === 'Body_Color' || mat?.name === 'Ferrari_Yellow') {
-        const paint = new THREE.MeshPhysicalMaterial({ color: '#f2b705', metalness: 0.4, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.06 })
-        m.material = paint
-      }
-    })
+  private amb: Ambassador
+  private radius = 0.45
+  private connY = 0
+
+  constructor(physics: Physics, pos: THREE.Vector3, yaw: number) {
+    this.amb = ambassador()
+    const model = this.amb.model
     this.root.add(model)
     model.updateMatrixWorld(true)
+    // headlights (the model's nose points along -Z)
+    for (const x of [-0.6, 0.6]) {
+      const s = new THREE.SpotLight('#fff1d2', 0, 45, 0.5, 0.55, 1.2)
+      s.position.set(x, 0.65, -2.1)
+      s.target.position.set(x * 1.6, 0, -14)
+      this.root.add(s, s.target)
+      this.beams.push(s)
+    }
     for (const n of ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']) {
       const w = model.getObjectByName(n)!
       this.wheels.push(w)
@@ -54,15 +59,16 @@ export class Car {
       RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y + 0.8, pos.z).setRotation(q).setLinearDamping(0.15).setAngularDamping(0.8).setCanSleep(true),
     )
     // chassis box (centre of mass lowered for stability)
-    w.createCollider(RAPIER.ColliderDesc.cuboid(1.0, 0.32, 2.2).setTranslation(0, 0.1, 0).setMass(1100).setFriction(0.4), this.body)
+    w.createCollider(RAPIER.ColliderDesc.cuboid(0.85, 0.32, 2.15).setTranslation(0, 0.1, 0).setMass(1100).setFriction(0.4), this.body)
     w.createCollider(RAPIER.ColliderDesc.cuboid(0.75, 0.22, 1.0).setTranslation(0, 0.5, -0.2).setMass(100), this.body)
     this.ctrl = w.createVehicleController(this.body)
     ;(this.ctrl as unknown as { setIndexForwardAxis: number }).setIndexForwardAxis = 2
-    const radius = 0.34
+    const radius = (this.radius = this.wheelBase[0].y)
     const rest = 0.3
+    // the body spawns 0.8 m above its model origin (road level); wheels hang from there
+    this.connY = radius - 0.8 + rest
     for (const wp of this.wheelBase) {
-      // wheel connection points in chassis space (model origin is at ground level)
-      this.ctrl.addWheel({ x: wp.x, y: 0.35 - 0.8 + rest, z: wp.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, rest, radius)
+      this.ctrl.addWheel({ x: wp.x, y: this.connY, z: wp.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, rest, radius)
     }
     for (let i = 0; i < 4; i++) {
       this.ctrl.setWheelSuspensionStiffness(i, 28)
@@ -117,6 +123,7 @@ export class Car {
         else if (speed > -10) engine = -2000 * -thr
       } else brake = 3
       if (input.brake) brake = 90
+    this.braking = brake > 10
       this.body.wakeUp()
     } else brake = 30
     this.steer = damp(this.steer, steerTarget, 8, dt)
@@ -139,13 +146,21 @@ export class Car {
     }
   }
 
+  setLights(night: number) {
+    for (const b of this.beams) b.intensity = night > 0.3 ? 60 * night : 0
+    this.amb.setNight(night, this.occupied && this.speed > 0.5 && this.braking)
+  }
+
   update(alpha: number, _dt?: number) {
     this.root.position.lerpVectors(this.prevP, this.currP, alpha)
-    this.root.position.y -= 0.8 - 0.35
+    // the model's origin is at road level: put it where the physics wheels actually touch the ground
+    let avg = 0
+    const lens = this.wheels.map((_, i) => this.ctrl.wheelSuspensionLength(i) ?? 0.3)
+    for (const l of lens) avg += l / lens.length
     this.root.quaternion.slerpQuaternions(this.prevQ, this.currQ, alpha)
+    this.root.position.add(new THREE.Vector3(0, this.connY - avg - this.radius, 0).applyQuaternion(this.root.quaternion))
     this.wheels.forEach((w, i) => {
-      const len = this.ctrl.wheelSuspensionLength(i) ?? 0.3
-      w.position.y = this.wheelBase[i].y + (0.3 - len)
+      w.position.y = this.wheelBase[i].y + (avg - lens[i])
       w.rotation.set(this.ctrl.wheelRotation(i) ?? 0, i < 2 ? this.steer : 0, 0, 'YXZ')
     })
   }

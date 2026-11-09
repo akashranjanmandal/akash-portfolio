@@ -5,8 +5,10 @@ import type { Quality } from './Engine'
 import { noise2, rng } from '../utils/math'
 import { Forest } from './Foliage'
 import { Town } from './city/Town'
+import { Howrah, riverDepth, STATION } from './city/Howrah'
+import { Traffic, kerbSpots } from './Traffic'
 import { Landmarks } from './city/Landmarks'
-import { PLOTS, plotFrame, SPAWN } from './city/Plan'
+import { PLOTS, plotFrame, SPAWN, SIGHTS } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -20,6 +22,10 @@ const SEG = 280
 
 /** terrain height at (x, z) — flat town, hills at the rim, beach, seabed */
 export function heightAt(x: number, z: number) {
+  return groundAt(x, z) - riverDepth(x)
+}
+
+function groundAt(x: number, z: number) {
   const r = Math.hypot(x / 1.15, z)
   const n = noise2(x * 0.006 + 11, z * 0.006 - 4) * 0.65 + noise2(x * 0.02, z * 0.02) * 0.35
   // under the paved town the ground sits just below the asphalt; undulation starts outside it
@@ -73,6 +79,14 @@ export class World {
   forest: Forest | null = null
   town!: Town
   landmarks!: Landmarks
+  howrah!: Howrah
+  traffic!: Traffic
+  /** positions the traffic should brake for besides the player (e.g. the player's taxi) */
+  obstacles: THREE.Vector3[] = []
+  night = 0
+  private lampGlow!: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>
+  private lampLights: THREE.PointLight[] = []
+  private lampTimer = 0
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer, private physics: Physics, private assets: Assets, private quality: Quality) {
     scene.add(this.group)
@@ -84,8 +98,47 @@ export class World {
     this.town = new Town(this.physics, this.assets)
     this.town.build()
     this.group.add(this.town.group)
+    // lamp heads glow after dark; a small pool of real lights follows the player
+    const heads = this.town.lampPositions.flatMap((p) => [p.x, 5.95, p.z])
+    const hg = new THREE.BufferGeometry()
+    hg.setAttribute('position', new THREE.Float32BufferAttribute(heads, 3))
+    const halo = document.createElement('canvas')
+    halo.width = halo.height = 64
+    const hc = halo.getContext('2d')!
+    const hgrd = hc.createRadialGradient(32, 32, 0, 32, 32, 32)
+    hgrd.addColorStop(0, 'rgba(255,230,180,1)')
+    hgrd.addColorStop(0.25, 'rgba(255,200,120,0.6)')
+    hgrd.addColorStop(1, 'rgba(255,180,90,0)')
+    hc.fillStyle = hgrd
+    hc.fillRect(0, 0, 64, 64)
+    this.lampGlow = new THREE.Points(hg, new THREE.PointsMaterial({ map: new THREE.CanvasTexture(halo), color: '#ffffff', size: 3.2, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }))
+    this.lampGlow.visible = false
+    this.group.add(this.lampGlow)
+    const count = this.quality.tier === 'high' ? 6 : this.quality.tier === 'mid' ? 4 : 0
+    for (let i = 0; i < count; i++) {
+      const l = new THREE.PointLight('#ffc87a', 0, 26, 1.6)
+      this.lampLights.push(l)
+      this.group.add(l)
+    }
+    // an invisible fence along the hill crests so nobody drives off into the sea
+    for (let i = 0; i < 64; i++) {
+      const a0 = (i / 64) * Math.PI * 2
+      const a1 = ((i + 1) / 64) * Math.PI * 2
+      const R = 455
+      const x0 = Math.cos(a0) * R * 1.15, z0 = Math.sin(a0) * R
+      const x1 = Math.cos(a1) * R * 1.15, z1 = Math.sin(a1) * R
+      const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2
+      const len = Math.hypot(x1 - x0, z1 - z0)
+      this.physics.fixedBox(mx, heightAt(mx, mz) + 5, mz, 0.5, 12, len / 2 + 1, Math.atan2(x1 - x0, z1 - z0))
+    }
+    this.howrah = new Howrah(this.physics, this.town.mats)
+    this.traffic = new Traffic(this.physics, this.quality.tier === 'low' ? 6 : 12)
+    this.traffic.park(kerbSpots(PLOTS.map((p) => plotFrame(p)), 14), this.physics)
+    this.group.add(this.traffic.group)
+    this.group.add(this.howrah.group)
     this.landmarks = new Landmarks(this.physics, this.town.mats, this.assets.images)
     this.landmarks.build()
+    for (const s of SIGHTS) this.landmarks.spots.push({ id: s.id, title: s.label, sub: s.sub, pos: new THREE.Vector3(s.x, 0, s.z), yaw: 0 })
     this.group.add(this.landmarks.group)
     this.scatter()
   }
@@ -193,6 +246,9 @@ export class World {
       return Math.abs(bx) < 22 && Math.abs(bz) < 22
     }
     const offRoad = (x: number, z: number) => {
+      if (riverDepth(x) > 0 || riverDepth(x - 6) > 0 || riverDepth(x + 6) > 0) return false
+      if (x < -200 && Math.abs(z) < 12) return false
+      if (Math.abs(x - STATION.x) < 26 && Math.abs(z - STATION.z) < 56) return false
       const town = Math.abs(x) < 215 && Math.abs(z) < 215
       if (town && !inBlockMiddle(x, z)) return false
       return !plots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)
@@ -229,16 +285,34 @@ export class World {
       const p = new THREE.Vector3().setFromMatrixPosition(m)
       this.physics.fixedCylinder(p.x, p.y + 2, p.z, 0.5, 4)
     }
-    const shrubs = pick(Math.round(420 * d), offRoad, 1.4)
+    const shrubs = pick(Math.round(260 * d), offRoad, 1.4)
     const shrub = this.assets.models.get('shrub_01')?.scene
     if (shrub) instanceModel(this.group, shrub, shrubs, false)
 
   }
 
   update(dt: number, t: number, player: THREE.Vector3) {
-    this.town.update(dt, player)
+    this.town.update(dt)
+    this.town.tram?.setNight(this.night)
+    const tram = this.town.tram?.group.position
+    this.traffic.update(dt, player, tram ? [...this.obstacles, tram] : this.obstacles, this.night)
     this.forest?.update(player)
-    this.landmarks.update(t, 0)
+    this.landmarks.update(t, this.night)
+    this.howrah.update(this.night)
+    this.town.setNight(this.night)
+    const lit = this.night > 0.3
+    this.lampGlow.visible = lit
+    this.lampTimer -= dt
+    if (this.lampTimer <= 0) {
+      this.lampTimer = 0.4
+      const near = lit ? [...this.town.lampPositions].sort((a, b) => a.distanceToSquared(player) - b.distanceToSquared(player)).slice(0, this.lampLights.length) : []
+      this.lampLights.forEach((l, i) => {
+        const p = near[i]
+        // never toggle .visible on lights: it changes the light count and recompiles every shader
+        l.intensity = p ? 26 * this.night : 0
+        if (p) l.position.set(p.x, 5.6, p.z)
+      })
+    }
     const n = (this.sea.material as THREE.MeshStandardMaterial).normalMap
     if (n) n.offset.set(t * 0.002, t * 0.0014)
   }

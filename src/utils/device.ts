@@ -20,7 +20,13 @@ export function hasWebGL(): boolean {
 
 /** Guess a quality tier from the device and the GPU string. Overridable with ?quality=low|mid|high */
 export function detectTier(gl: WebGL2RenderingContext): Tier {
-  const forced = params.get('quality')
+  let saved: string | null = null
+  try {
+    saved = localStorage.getItem('akash:quality')
+  } catch {
+    /* storage blocked */
+  }
+  const forced = params.get('quality') ?? saved
   if (forced === 'low' || forced === 'mid' || forced === 'high') return forced
 
   let renderer = ''

@@ -94,6 +94,11 @@ export class Player {
     return this.root.position
   }
 
+  /** walking speed in m/s and whether the feet are on the ground */
+  get gait() {
+    return { speed: this.speed, grounded: this.grounded }
+  }
+
   get moving() {
     return this.speed > 0.2
   }

@@ -2,7 +2,7 @@ import gsap from 'gsap'
 import { PROFILE, PROJECTS, STOPS, SKILLS, TESTIMONIALS } from '../content'
 import { ICONS, escapeHtml } from '../utils/dom'
 import { reducedMotion } from '../utils/device'
-import { PLOTS, GRID } from '../game/city/Plan'
+import { PLOTS, GRID, SIGHTS } from '../game/city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    THE PHONE
@@ -209,7 +209,7 @@ export class Phone {
   private map() {
     return `${this.bar('Map')}
       <div class="ph-map"><canvas id="ph-map" width="600" height="600"></canvas><p>Tap a place to set a waypoint.</p>
-      <ul class="ph-places">${PLOTS.map((p) => `<li><button type="button" data-way="${p.id}"><span>${escapeHtml(stopFor(p.id)?.label ?? p.id)}</span>${this.waypoint === p.id ? '<em>●</em>' : ''}</button></li>`).join('')}</ul></div>`
+      <ul class="ph-places">${[...PLOTS.map((p) => ({ id: p.id, label: stopFor(p.id)?.label ?? p.id })), ...SIGHTS].map((p) => `<li><button type="button" data-way="${p.id}"><span>${escapeHtml(p.label)}</span>${this.waypoint === p.id ? '<em>●</em>' : ''}</button></li>`).join('')}</ul></div>`
   }
 
   private drawMap() {
@@ -217,17 +217,29 @@ export class Phone {
     if (!c) return
     const g = c.getContext('2d')!
     const S = c.width
-    const span = 470
-    const P = (x: number, z: number): [number, number] => [((x + span / 2) / span) * S, ((z + span / 2) / span) * S]
+    const span = 800
+    const P = (x: number, z: number): [number, number] => [((x + 120 + span / 2) / span) * S, ((z + 40 + span / 2) / span) * S]
     g.fillStyle = '#2a4d3a'
     g.fillRect(0, 0, S, S)
     g.fillStyle = '#3a3a40'
+    // the Hooghly
+    g.fillStyle = '#4f6d7a'
+    const [rx0] = P(-312, 0)
+    const [rx1] = P(-232, 0)
+    g.fillRect(rx0, 0, rx1 - rx0, S)
+    g.fillStyle = '#3a3a40'
     for (const v of GRID) {
-      const [a] = P(v - 5, 0)
-      const [b] = P(v + 5, 0)
-      g.fillRect(a, 0, b - a, S)
-      g.fillRect(0, a, S, b - a)
+      const [a, ta] = P(v - 5, -205)
+      const [b2, tb] = P(v + 5, 205)
+      g.fillRect(a, ta, b2 - a, tb - ta)
+      const [la, ya] = P(-205, v - 5)
+      const [lb, yb] = P(205, v + 5)
+      g.fillRect(la, ya, lb - la, yb - ya)
     }
+    // the bridge road west to the station
+    const [bx0, bz0] = P(-400, -5)
+    const [bx1, bz1] = P(-205, 5)
+    g.fillRect(bx0, bz0, bx1 - bx0, bz1 - bz0)
     g.font = '600 15px system-ui, sans-serif'
     g.textAlign = 'center'
     for (const p of PLOTS) {
@@ -239,6 +251,15 @@ export class Phone {
       g.fill()
       g.fillStyle = 'rgba(255,255,255,0.9)'
       g.fillText(stopFor(p.id)?.label ?? p.id, x, y - 12)
+    }
+    for (const s of SIGHTS) {
+      const [x, y] = P(s.x, s.z)
+      g.fillStyle = this.waypoint === s.id ? '#ffc61a' : '#ffd8f0'
+      g.beginPath()
+      g.arc(x, y, 7, 0, Math.PI * 2)
+      g.fill()
+      g.fillStyle = 'rgba(255,255,255,0.9)'
+      g.fillText(s.label, x, y - 12)
     }
     const [px, py] = P(this.where.x, this.where.z)
     g.save()
@@ -254,11 +275,11 @@ export class Phone {
     g.restore()
     c.onclick = (e) => {
       const r = c.getBoundingClientRect()
-      const x = ((e.clientX - r.left) / r.width) * span - span / 2
-      const z = ((e.clientY - r.top) / r.height) * span - span / 2
-      let best = PLOTS[0]
+      const x = ((e.clientX - r.left) / r.width) * span - span / 2 - 120
+      const z = ((e.clientY - r.top) / r.height) * span - span / 2 - 40
+      let best: { id: string } = PLOTS[0]
       let bd = Infinity
-      for (const p of PLOTS) {
+      for (const p of [...PLOTS.map((q) => ({ id: q.id, cx: q.cx, cz: q.cz })), ...SIGHTS.map((s) => ({ id: s.id, cx: s.x, cz: s.z }))]) {
         const d = (p.cx - x) ** 2 + (p.cz - z) ** 2
         if (d < bd) {
           bd = d

@@ -7,7 +7,7 @@
     <meta name="description" content="Hop into a Kolkata taxi and ride across a floating island in the sky — the interactive portfolio of Akash Ranjan Mandal, full-stack engineer and DevOps lead at GOBT. Work: GharKaMali, PizzaHap, GFTD, Al-Taqwa, Accurate Astro, Mastermind Abacus, AGILE Engineering, Idea Shapers and gobt.in." />
     <meta name="author" content="Akash Ranjan Mandal" />
     <!-- Third-party assets used in the 3D world (not shown on screen) -->
-    <meta name="credits" content="Textures, trees, street furniture and props: Poly Haven (polyhaven.com), CC0. Character: Ready Player Me sample avatar, animated with Mixamo clips (Xbot), both from the three.js examples. Car: Ferrari 458 Italia by vicent091036 (sketchfab.com/models/57bf6cc56931426e87494f554df1dab6), via the three.js examples. Bicycle: Carbon Frame Bike by prefrontal cortex (sketchfab.com/prefrontalcortex), via the three.js examples. Libraries: three.js (MIT), Rapier (Apache-2.0), postprocessing (Zlib), N8AO (CC0), GSAP." />
+    <meta name="credits" content="Textures, trees, street furniture and props: Poly Haven (polyhaven.com), CC0. Character: Ready Player Me sample avatar, animated with Mixamo clips (Xbot), both from the three.js examples. Map data and layout inspiration: Kolkata, India. Bicycle: Carbon Frame Bike by prefrontal cortex (sketchfab.com/prefrontalcortex), via the three.js examples. Libraries: three.js (MIT), Rapier (Apache-2.0), postprocessing (Zlib), N8AO (CC0), GSAP." />
     <meta name="theme-color" content="#121019" />
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -84,6 +84,14 @@
             <span class="btn__label">Enter the town</span>
           </button>
           <label class="check"><input type="checkbox" id="start-sound" checked /> <span>Sound on</span></label>
+          <label class="check quality">Graphics
+            <select id="quality">
+              <option value="auto">Auto</option>
+              <option value="high">High</option>
+              <option value="mid">Balanced</option>
+              <option value="low">Battery saver</option>
+            </select>
+          </label>
         </div>
         <p class="loader__hint">Walk, ride or drive around Akash’s town · every building is a project</p>
       </div>
@@ -101,6 +109,7 @@
       </a>
       <nav class="topbar__nav" aria-label="Site">
         <button class="pill pill--ghost" type="button" data-action="resume"><span class="pill__icon" data-icon="doc"></span><span class="hide-xs">Resume</span></button>
+        <button class="pill pill--ghost" type="button" id="btn-time" aria-label="Change time of day"><span class="pill__icon" data-icon="sun"></span><span class="hide-xs" id="btn-time-label">Day</span></button>
         <button class="pill pill--ghost pill--icon" type="button" id="btn-sound" aria-pressed="true" aria-label="Sound"><span class="pill__icon" data-icon="soundOn"></span></button>
         <button class="pill pill--accent" type="button" data-action="phone"><span class="pill__icon" data-icon="phone"></span><span>Phone</span></button>
       </nav>

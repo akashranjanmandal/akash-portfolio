@@ -74,3 +74,10 @@ export const SPAWN = (() => {
   // standing across the pavement, looking at the house and the open garage
   return { x: p.x, z: p.z, yaw: Math.PI - 0.25 }
 })()
+
+/** famous places that aren't portfolio stops but deserve a waypoint */
+export const SIGHTS = [
+  { id: 'howrah', label: 'Howrah Bridge', sub: 'Across the Hooghly', x: -232, z: 9 },
+  { id: 'station', label: 'Howrah Station', sub: 'The other bank', x: -355, z: 0 },
+  { id: 'memorial', label: 'Victoria Memorial', sub: 'White marble, since 1921', x: 0, z: -250 },
+]

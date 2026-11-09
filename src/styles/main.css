@@ -910,3 +910,6 @@ body:not(.is-ready) .touch, body.phone-open .touch { display: none !important; }
 .toasts { top: calc(var(--safe-t) + 92px) !important; }
 @media (max-width: 640px) { .toasts { top: calc(var(--safe-t) + 136px) !important; } }
 body.phone-open .minimap, body.phone-open .help { opacity: 0; transition: opacity 0.3s; }
+
+.quality select { margin-left: 6px; padding: 6px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.08); color: #fff; font: 600 13px var(--f-display); }
+.quality select option { color: #141218; }

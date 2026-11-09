@@ -1,6 +1,5 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
 import { RAPIER, type Physics } from '../Physics'
 import { Batch, M } from './Batch'
 import type { Materials } from './Town'
@@ -110,7 +109,22 @@ function tramTexture() {
   return t
 }
 
+/** just the window panes, used as the tram's glow map after dark */
+function tramGlow() {
+  const c = document.createElement('canvas')
+  c.width = 1024
+  c.height = 256
+  const g = c.getContext('2d')!
+  g.fillStyle = '#000'
+  g.fillRect(0, 0, 1024, 256)
+  g.fillStyle = '#ffe2b0'
+  for (let i = 0; i < 9; i++) g.fillRect(40 + i * 108, 48, 82, 92)
+  return new THREE.CanvasTexture(c)
+}
+
 export class Tram {
+  private side!: THREE.MeshStandardMaterial
+  private lamp!: THREE.Mesh
   readonly group = new THREE.Group()
   private body: RAPIER.RigidBody
   private z = -170
@@ -119,10 +133,12 @@ export class Tram {
   private readonly x = 0
   static readonly Z0 = -190
   static readonly Z1 = 190
+  onBell?: (pos: THREE.Vector3) => void
 
   constructor(physics: Physics) {
     const tex = tramTexture()
-    const side = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 })
+    const side = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, emissiveMap: tramGlow(), emissive: '#ffffff', emissiveIntensity: 0 })
+    this.side = side
     const end = new THREE.MeshStandardMaterial({ color: '#e9e1cf', roughness: 0.5 })
     const roof = new THREE.MeshStandardMaterial({ color: '#7b7f86', roughness: 0.6, metalness: 0.3 })
     const dark = new THREE.MeshStandardMaterial({ color: '#202124', roughness: 0.7 })
@@ -151,9 +167,21 @@ export class Tram {
       bogie.position.set(0, 0.3, z)
       this.group.add(bogie)
     }
+    // headlamps at both ends
+    this.lamp = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8), new THREE.MeshStandardMaterial({ color: '#fff', emissive: '#fff3d0', emissiveIntensity: 0.2 }))
+    for (const z of [-L / 2 - 0.05, L / 2 + 0.05]) {
+      const m = this.lamp.clone()
+      m.position.set(0, 1.4, z)
+      this.group.add(m)
+    }
     this.group.position.set(this.x, 0.02, this.z)
     this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(this.x, 1.9, this.z))
     physics.world.createCollider(RAPIER.ColliderDesc.cuboid(W / 2, 1.5, L / 2), this.body)
+  }
+
+  setNight(n: number) {
+    this.side.emissiveIntensity = n > 0.3 ? 1.6 * n : 0
+    ;(this.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + (n > 0.3 ? 6 * n : 0)
   }
 
   update(dt: number) {
@@ -166,6 +194,7 @@ export class Tram {
       this.z = THREE.MathUtils.clamp(this.z, Tram.Z0, Tram.Z1)
       this.dir *= -1
       this.wait = 6
+      this.onBell?.(this.group.position)
     }
     this.group.position.z = this.z
     this.body.setNextKinematicTranslation({ x: this.x, y: 1.9, z: this.z })
@@ -182,53 +211,6 @@ export function tramLine(b: Batch) {
 }
 
 /* ── parked yellow taxis (merged into a few draws) ──────────── */
-
-/** parked taxis are full models, so each one only renders when the player is near */
-export function parkedTaxis(group: THREE.Group, physics: Physics, car: GLTF) {
-  const yellow = new THREE.MeshPhysicalMaterial({ color: '#f2b705', metalness: 0.4, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 })
-  const r = rng(5)
-  const spots: [number, number, number][] = []
-  // along the kerbs, nose in the traffic direction, avoiding junctions and landmark entrances
-  const entrances = PLOTS.map((p) => plotFrame(p))
-  for (const g of GRID) {
-    for (let i = 0; i < GRID.length - 1; i++) {
-      const a = GRID[i] + ROAD_W / 2 + 14
-      const c = GRID[i + 1] - ROAD_W / 2 - 14
-      for (let t = a; t < c; t += 9) {
-        if (r() > 0.18) continue
-        const side = r() < 0.5 ? -1 : 1
-        const vertical = r() < 0.5
-        const x = vertical ? g + side * (ROAD_W / 2 - 1.2) : t
-        const z = vertical ? t : g + side * (ROAD_W / 2 - 1.2)
-        if (g === 0 && vertical) continue // keep the tram lane clear
-        if (entrances.some((e) => Math.hypot(e.x - x, e.z - z) < 12)) continue
-        spots.push([x, z, vertical ? (side > 0 ? Math.PI : 0) : side > 0 ? Math.PI / 2 : -Math.PI / 2])
-      }
-    }
-  }
-  const out: THREE.Object3D[] = []
-  for (const [x, z, yaw] of spots.slice(0, 14)) {
-    const taxi = car.scene.clone(true)
-    taxi.traverse((o) => {
-      const m = o as THREE.Mesh
-      if (!m.isMesh) return
-      m.castShadow = true
-      const name = (m.material as THREE.Material).name
-      if (name === 'Body_Color' || name === 'Ferrari_Yellow') m.material = yellow
-    })
-    taxi.position.set(x, 0.02, z)
-    taxi.rotation.y = yaw
-    taxi.visible = false
-    group.add(taxi)
-    out.push(taxi)
-    physics.fixedBox(x, 0.6, z, 1.0, 0.6, 2.25, yaw)
-  }
-  return out
-}
-
-export function cullNear(objs: THREE.Object3D[], p: THREE.Vector3, d = 60) {
-  for (const o of objs) o.visible = Math.abs(o.position.x - p.x) < d && Math.abs(o.position.z - p.z) < d
-}
 
 /* ── street furniture ───────────────────────────────────────── */
 

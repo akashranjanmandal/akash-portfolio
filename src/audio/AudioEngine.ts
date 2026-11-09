@@ -20,6 +20,8 @@ export class AudioEngine {
   private windFilter!: BiquadFilterNode
   private noise!: AudioBuffer
   private nextAmbient = 0
+  private nextHorn = 4
+  private cityGain: GainNode | null = null
   enabled = storage.get('akash:sound') !== 'off'
 
   /** must run inside a user gesture */
@@ -85,6 +87,19 @@ export class AudioEngine {
     this.windGain.gain.value = 0
     wind.connect(this.windFilter).connect(this.windGain).connect(this.master)
     wind.start()
+
+    // a low city murmur: brown-ish noise, heavily low-passed
+    const city = ctx.createBufferSource()
+    city.buffer = this.noise
+    city.loop = true
+    city.playbackRate.value = 0.5
+    const lp = ctx.createBiquadFilter()
+    lp.type = 'lowpass'
+    lp.frequency.value = 260
+    this.cityGain = ctx.createGain()
+    this.cityGain.gain.value = 0.05
+    city.connect(lp).connect(this.cityGain).connect(this.master)
+    city.start()
   }
 
   setEnabled(on: boolean) {
@@ -112,11 +127,80 @@ export class AudioEngine {
     this.windGain.gain.setTargetAtTime(s * s * (driving ? 0.09 : 0.05), t, 0.2)
     this.windFilter.frequency.setTargetAtTime(400 + s * 900, t, 0.2)
 
+    if (this.cityGain) this.cityGain.gain.setTargetAtTime(0.04 + (1 - night) * 0.03, t, 1)
+    if (t > this.nextHorn) {
+      this.nextHorn = t + 5 + Math.random() * 12 * (1 + night)
+      this.distantHorn()
+    }
     if (t > this.nextAmbient) {
       this.nextAmbient = t + 1.4 + Math.random() * 3.2
       if (night > 0.6) this.cricket()
       else if (night < 0.3) this.bird()
     }
+  }
+
+  /** one footstep: a short filtered thump with a little grit */
+  footstep(run: boolean) {
+    const ctx = this.ctx
+    if (!ctx || !this.enabled) return
+    const now = ctx.currentTime
+    const src = ctx.createBufferSource()
+    src.buffer = this.noise
+    const bp = ctx.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.value = 380 + Math.random() * 220
+    bp.Q.value = 1.2
+    const g = ctx.createGain()
+    const v = run ? 0.16 : 0.1
+    g.gain.setValueAtTime(v, now)
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.09)
+    src.connect(bp).connect(g).connect(this.master)
+    src.start(now, Math.random(), 0.1)
+  }
+
+  /** the tram's double ding */
+  tramBell(volume = 1) {
+    const ctx = this.ctx
+    if (!ctx || !this.enabled || volume < 0.02) return
+    const now = ctx.currentTime
+    for (const t of [0, 0.32]) {
+      for (const [hz, a] of [[1320, 1], [2640, 0.35], [3960, 0.15]]) {
+        const o = ctx.createOscillator()
+        o.frequency.value = hz
+        const g = ctx.createGain()
+        g.gain.setValueAtTime(0.0001, now + t)
+        g.gain.exponentialRampToValueAtTime(0.12 * a * volume, now + t + 0.005)
+        g.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.9)
+        o.connect(g).connect(this.master)
+        o.start(now + t)
+        o.stop(now + t + 1)
+      }
+    }
+  }
+
+  /** a far-off honk somewhere in town, now and then */
+  private distantHorn() {
+    const ctx = this.ctx!
+    const now = ctx.currentTime
+    const g = ctx.createGain()
+    const lp = ctx.createBiquadFilter()
+    lp.type = 'lowpass'
+    lp.frequency.value = 900
+    const len = 0.18 + Math.random() * 0.3
+    g.gain.setValueAtTime(0, now)
+    g.gain.linearRampToValueAtTime(0.025, now + 0.02)
+    g.gain.setValueAtTime(0.025, now + len)
+    g.gain.linearRampToValueAtTime(0, now + len + 0.05)
+    const base = 300 + Math.random() * 250
+    for (const hz of [base, base * 1.26]) {
+      const o = ctx.createOscillator()
+      o.type = 'sawtooth'
+      o.frequency.value = hz
+      o.connect(lp)
+      o.start(now)
+      o.stop(now + len + 0.1)
+    }
+    lp.connect(g).connect(this.master)
   }
 
   /** pom-pom */

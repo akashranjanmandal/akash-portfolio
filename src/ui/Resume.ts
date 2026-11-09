@@ -1,9 +1,14 @@
 import gsap from 'gsap'
 import { PROFILE, PROJECTS, STOPS, SKILLS, TESTIMONIALS, EXPERIENCE, EDUCATION } from '../content'
 import { ICONS, escapeHtml } from '../utils/dom'
-import { reviewCard } from './Panels'
 import { trapFocus } from './focus'
 import { reducedMotion } from '../utils/device'
+
+function reviewCard(t: (typeof TESTIMONIALS)[number]) {
+  const initials = t.name.split(' ').map((w) => w[0]).join('').slice(0, 2)
+  const avatar = t.photo ? `<img class="avatar" src="${t.photo}" alt="" loading="lazy" width="34" height="34">` : `<span class="avatar" aria-hidden="true">${initials}</span>`
+  return `<figure class="review"><p>“${escapeHtml(t.text)}”</p><footer>${avatar}<span><b>${escapeHtml(t.name)}</b>${escapeHtml(t.role)}</span></footer></figure>`
+}
 
 /** the express route: everything on one calm, printable, accessible page */
 export class Resume {

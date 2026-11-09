@@ -4,7 +4,7 @@ import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
 import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame } from './Plan'
 import { rng } from '../../utils/math'
-import { kerbStripes, wires, tramLine, Tram, parkedTaxis, streetLife, victoriaMemorial, cullNear } from './Kolkata'
+import { kerbStripes, wires, tramLine, Tram, streetLife, victoriaMemorial } from './Kolkata'
 
 /* Roads, kerbs, pavements, street lights and the ordinary buildings
    that make the town feel lived in. Landmarks are built separately. */
@@ -88,6 +88,36 @@ function signAtlas() {
   return new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 0.08 })
 }
 
+/** green louvred 'khorkhori' shutters: one texture metre = ~22 slats */
+function louvreMaterial() {
+  const c = document.createElement('canvas')
+  c.width = 64
+  c.height = 256
+  const g = c.getContext('2d')!
+  g.fillStyle = '#2f5d43'
+  g.fillRect(0, 0, 64, 256)
+  for (let y = 0; y < 256; y += 11.6) {
+    const grd = g.createLinearGradient(0, y, 0, y + 11.6)
+    grd.addColorStop(0, '#4a7d5f')
+    grd.addColorStop(0.6, '#2c5640')
+    grd.addColorStop(1, '#14291e')
+    g.fillStyle = grd
+    g.fillRect(0, y, 64, 11.6)
+  }
+  g.fillStyle = '#21402f'
+  g.fillRect(0, 0, 5, 256)
+  g.fillRect(59, 0, 5, 256)
+  // weathering
+  for (let k = 0; k < 160; k++) {
+    g.fillStyle = `rgba(${Math.random() < 0.6 ? '210,200,170' : '20,20,15'},${Math.random() * 0.18})`
+    g.fillRect(Math.random() * 64, Math.random() * 256, 1 + Math.random() * 6, 1 + Math.random() * 3)
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.75 })
+}
+
 function awningMaterial() {
   const c = document.createElement('canvas')
   c.width = 128
@@ -128,7 +158,8 @@ export function townMaterials(a: Assets) {
     brick: weather(a.material('brick_wall_10', 1), 0.6),
     redBrick: weather(a.material('red_brick_03', 1), 0.6),
     concrete: weather(a.material('concrete_wall_008', 1, { color: '#b8b4ac' })),
-    shutter: new THREE.MeshStandardMaterial({ color: '#2f5d43', roughness: 0.7 }),
+    shutter: louvreMaterial(),
+    aircon: new THREE.MeshStandardMaterial({ color: '#d9d6cf', roughness: 0.5, metalness: 0.2 }),
     rail: new THREE.MeshStandardMaterial({ color: '#2a2a2e', roughness: 0.5, metalness: 0.6 }),
     corrugated: a.material('corrugated_iron_02', 1),
     wood: a.material('wood_planks', 1),
@@ -153,7 +184,12 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
   b.box(w, h, d, wall, at(0, h / 2, 0), 2.5)
   // cornice per floor and a parapet
   for (let f = 1; f <= floors; f++) b.box(w + 0.24, 0.16, d + 0.24, m.trim, at(0, f * FLOOR + 0.2, 0))
-  b.box(w + 0.3, 0.9, 0.25, m.trim, at(0, h + 0.45, d / 2))
+  if (r() < 0.5) {
+    // balustered parapet on the street side
+    b.box(w + 0.3, 0.14, 0.32, m.trim, at(0, h + 0.07, d / 2))
+    b.box(w + 0.3, 0.14, 0.32, m.trim, at(0, h + 0.88, d / 2))
+    for (let k = -w / 2 + 0.2; k <= w / 2 - 0.2; k += 0.32) b.add(new THREE.CylinderGeometry(0.06, 0.09, 0.66, 6), m.trim, at(k, h + 0.47, d / 2))
+  } else b.box(w + 0.3, 0.9, 0.25, m.trim, at(0, h + 0.45, d / 2))
   b.box(w + 0.3, 0.9, 0.25, m.trim, at(0, h + 0.45, -d / 2))
   b.box(0.25, 0.9, d, m.trim, at(w / 2, h + 0.45, 0))
   b.box(0.25, 0.9, d, m.trim, at(-w / 2, h + 0.45, 0))
@@ -165,8 +201,10 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
     [w / 2, 0, Math.PI / 2, d],
     [-w / 2, 0, -Math.PI / 2, d],
   ]
-  const green = r() < 0.55
+  const green = r() < 0.7
   const balconies = r() < 0.6
+  const arched = r() < 0.45
+  const pilasters = r() < 0.5
   for (const [fx, fz, fy, len] of faces) {
     const cols = Math.max(1, Math.floor((len - 1.2) / 3))
     const step = len / cols
@@ -182,10 +220,20 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
         b.box(1.5, 1.75, 0.1, m.frame, at(wx, y, wz, fy).multiply(M(0, 0, 0.03)))
         b.add(new THREE.PlaneGeometry(1.3, 1.55), lit ? m.glassLit : m.glass, at(wx, y, wz, fy).multiply(M(0, 0, 0.085)))
         b.box(1.7, 0.08, 0.22, m.trim, at(wx, y - 0.92, wz, fy).multiply(M(0, 0, 0.08)))
+        if (arched) {
+          // a semicircular fanlight over the window, framed in plaster trim
+          b.add(new THREE.CircleGeometry(0.75, 16, 0, Math.PI), m.glass, at(wx, y + 0.875, wz, fy).multiply(M(0, 0, 0.07)))
+          b.add(new THREE.RingGeometry(0.75, 0.9, 16, 1, 0, Math.PI), m.trim, at(wx, y + 0.875, wz, fy).multiply(M(0, 0, 0.09)))
+        }
+        if (pilasters && c > 0) b.box(0.35, FLOOR - 0.2, 0.12, m.trim, at(wx, f * FLOOR + FLOOR / 2 + 0.2, wz, fy).multiply(M(-step / 2, 0, 0.05)))
+        if (f > 0 && r() < 0.07) {
+          // a window air-conditioner box, the unofficial Kolkata facade ornament
+          b.box(0.75, 0.5, 0.55, m.aircon, at(wx, y - 1.25, wz, fy).multiply(M(0.2, 0, 0.3)))
+        }
         if (green) {
           // louvred shutters folded open either side
-          b.box(0.6, 1.6, 0.05, m.shutter, at(wx, y, wz, fy).multiply(M(-1.06, 0, 0.06)))
-          b.box(0.6, 1.6, 0.05, m.shutter, at(wx, y, wz, fy).multiply(M(1.06, 0, 0.06)))
+          b.box(0.6, 1.6, 0.05, m.shutter, at(wx, y, wz, fy).multiply(M(-1.06, 0, 0.06)), 1)
+          b.box(0.6, 1.6, 0.05, m.shutter, at(wx, y, wz, fy).multiply(M(1.06, 0, 0.06)), 1)
         }
         if (balconies && f > 0 && c % 2 === 0 && fy === 0) {
           b.box(2.2, 0.14, 1.0, m.trim, at(wx, y - 1.0, wz, fy).multiply(M(0, 0, 0.5)))
@@ -237,11 +285,8 @@ export class Town {
   }
 
   tram: Tram | null = null
-  private taxis: THREE.Object3D[] = []
-
-  update(dt: number, p: THREE.Vector3) {
+  update(dt: number) {
     this.tram?.update(dt)
-    cullNear(this.taxis, p)
   }
 
   build() {
@@ -253,9 +298,8 @@ export class Town {
     streetLife(b, this.mats, this.physics)
     victoriaMemorial(b, this.mats, this.physics)
     b.build(this.group)
-    const car = this.assets.models.get('car')
-    if (car) this.taxis = parkedTaxis(this.group, this.physics, car)
     this.lamps()
+    this.buildPools()
     this.group.add(wires(this.lampPositions))
     this.tram = new Tram(this.physics)
     this.group.add(this.tram.group)
@@ -374,7 +418,17 @@ export class Town {
     lamp.traverse((o) => {
       const mesh = o as THREE.Mesh
       if (!mesh.isMesh) return
-      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, mats.length)
+      let material = mesh.material as THREE.MeshStandardMaterial
+      if (/glass/i.test(material.name)) {
+        // the lantern glass becomes the light source after dark
+        material = material.clone()
+        material.emissive = new THREE.Color('#ffc979')
+        material.emissiveIntensity = 0
+        material.transparent = false
+        material.opacity = 1
+        this.lampGlass = material
+      }
+      const inst = new THREE.InstancedMesh(mesh.geometry, material, mats.length)
       mats.forEach((mat, k) => inst.setMatrixAt(k, mat.clone().multiply(mesh.matrixWorld)))
       inst.castShadow = true
       inst.computeBoundingSphere()
@@ -382,7 +436,36 @@ export class Town {
     })
   }
 
+  private lampGlass: THREE.MeshStandardMaterial | null = null
+  private pools: THREE.InstancedMesh | null = null
+
+  /** soft light pools on the ground under every lamp (cheap: one instanced decal) */
+  buildPools() {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const g = c.getContext('2d')!
+    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
+    grd.addColorStop(0, 'rgba(255,200,120,0.85)')
+    grd.addColorStop(0.45, 'rgba(255,180,100,0.35)')
+    grd.addColorStop(1, 'rgba(255,170,90,0)')
+    g.fillStyle = grd
+    g.fillRect(0, 0, 128, 128)
+    const tex = new THREE.CanvasTexture(c)
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 })
+    const geo = new THREE.PlaneGeometry(12, 12).rotateX(-Math.PI / 2)
+    this.pools = new THREE.InstancedMesh(geo, mat, this.lampPositions.length)
+    this.lampPositions.forEach((p, i) => this.pools!.setMatrixAt(i, M(p.x, CURB + 0.03, p.z)))
+    this.pools.renderOrder = 1
+    this.pools.visible = false
+    this.group.add(this.pools)
+  }
+
   setNight(n: number) {
-    this.mats.glassLit.emissiveIntensity = n * 1.6
+    if (this.lampGlass) this.lampGlass.emissiveIntensity = n > 0.3 ? 9 * n : 0
+    if (this.pools) {
+      this.pools.visible = n > 0.3
+      ;(this.pools.material as THREE.MeshBasicMaterial).opacity = n * 0.55
+    }
+    this.mats.glassLit.emissiveIntensity = n * 0.75
   }
 }

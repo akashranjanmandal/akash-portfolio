@@ -28,9 +28,22 @@ export class GameApp {
   private mapBg: HTMLCanvasElement | null = null
   private frame = 0
   private helpTimer = 0
+  private stepPhase = 0
 
   async boot() {
     this.renderIcons()
+    const q = $('quality') as HTMLSelectElement
+    q.value = storage.get('akash:quality') ?? 'auto'
+    q.addEventListener('change', () => {
+      if (q.value === 'auto') {
+        try {
+          localStorage.removeItem('akash:quality')
+        } catch {
+          /* ignore */
+        }
+      } else storage.set('akash:quality', q.value)
+      location.reload()
+    })
     if (!hasWebGL()) return this.noWebGL()
     const fonts = ['800 40px "Bricolage Grotesque Variable"', '700 40px "JetBrains Mono Variable"', '400 40px "Instrument Serif"']
     await Promise.race([Promise.all(fonts.map((f) => document.fonts.load(f))), new Promise((r) => setTimeout(r, 3000))])
@@ -83,6 +96,22 @@ export class GameApp {
       this.resume.open()
     }
     this.phone.onWaypoint = (id) => this.setWaypoint(id)
+    const tram = g.world.town.tram
+    if (tram) tram.onBell = (pos) => this.audio.tramBell(Math.max(0, 1 - pos.distanceTo(g.player.position) / 140))
+    const timeBtn = $('btn-time')
+    const modes = ['day', 'golden', 'night'] as const
+    const labels = { day: 'Day', golden: 'Golden hour', night: 'Night' }
+    const saved = storage.get('akash:time') as (typeof modes)[number] | null
+    if (saved && modes.includes(saved)) g.env.setTime(saved)
+    const sync = () => ($('btn-time-label').textContent = labels[g.env.mode])
+    sync()
+    timeBtn.addEventListener('click', () => {
+      const next = modes[(modes.indexOf(g.env.mode) + 1) % modes.length]
+      g.env.setTime(next)
+      storage.set('akash:time', next)
+      sync()
+      this.audio.tick()
+    })
     this.resume.onOpen = () => {
       g.input.enabled = false
       if (document.pointerLockElement) document.exitPointerLock()
@@ -143,8 +172,8 @@ export class GameApp {
     this.beam.position.set(spot.pos.x, 60, spot.pos.z)
     this.beam.visible = true
     $('waypoint').hidden = false
-    $('waypoint-name').textContent = stopFor(id)?.label ?? spot.title
-    this.toasts.show('📍', `Waypoint set: ${stopFor(id)?.label ?? spot.title}`, 2400)
+    $('waypoint-name').textContent = spot.title
+    this.toasts.show('📍', `Waypoint set: ${spot.title}`, 2400)
   }
 
   private tick(dt: number) {
@@ -196,7 +225,16 @@ export class GameApp {
     const speedEl = $('speed')
     speedEl.hidden = !v
     if (v) $('speed-num').textContent = String(Math.round(Math.abs(v.speed) * 3.6))
-    this.audio.update(v?.kind === 'car' ? v.speed : 0, v?.kind === 'car' ? Math.min(1, Math.abs(g.input.move.y)) : 0, false, v?.kind === 'car', 0)
+    this.audio.update(v?.kind === 'car' ? v.speed : 0, v?.kind === 'car' ? Math.min(1, Math.abs(g.input.move.y)) : 0, false, v?.kind === 'car', g.env.night)
+    // footsteps keep time with the stride
+    const gait = p.gait
+    if (!v && gait.grounded && gait.speed > 0.6) {
+      this.stepPhase += dt * (gait.speed > 4.5 ? 3.1 : 1.9) * Math.min(1.4, gait.speed / 3)
+      if (this.stepPhase >= 1) {
+        this.stepPhase -= 1
+        this.audio.footstep(gait.speed > 4.5)
+      }
+    } else this.stepPhase = 0.8
     if (v && g.input.consume('KeyH')) this.audio.horn()
 
     // compass + minimap
@@ -224,13 +262,17 @@ export class GameApp {
     const g = bg.getContext('2d')!
     g.fillStyle = '#35553f'
     g.fillRect(0, 0, S, S)
-    const span = 470
+    const span = 900
     const P = (v: number) => ((v + span / 2) / span) * S
+    g.fillStyle = '#4f6d7a'
+    g.fillRect(P(-312), 0, P(-232) - P(-312), S)
     g.fillStyle = '#d8d2c6'
     for (const v of GRID) {
-      g.fillRect(P(v - 5), 0, P(v + 5) - P(v - 5), S)
-      g.fillRect(0, P(v - 5), S, P(v + 5) - P(v - 5))
+      g.fillRect(P(v - 5), P(-205), P(v + 5) - P(v - 5), P(205) - P(-205))
+      g.fillRect(P(-205), P(v - 5), P(205) - P(-205), P(v + 5) - P(v - 5))
     }
+    g.fillRect(P(-400), P(-5), P(-205) - P(-400), P(5) - P(-5))
+    g.fillRect(P(-5), P(-330), P(5) - P(-5), P(-205) - P(-330))
     this.mapBg = bg
   }
 
@@ -238,7 +280,7 @@ export class GameApp {
     const c = this.mapCtx
     const W = c.canvas.width
     if (!this.mapBg) return
-    const span = 470
+    const span = 900
     const zoom = 2.2
     c.save()
     c.clearRect(0, 0, W, W)
