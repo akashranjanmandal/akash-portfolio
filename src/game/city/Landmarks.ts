@@ -1,9 +1,12 @@
 import * as THREE from 'three'
+import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
 import type { Physics } from '../Physics'
 import { Batch, M } from './Batch'
 import { townBuilding, type Materials } from './Town'
 import { PLOTS, plotFrame, type Plot } from './Plan'
 import { rng } from '../../utils/math'
+import { mergeByMaterial } from '../merge'
+import { addFairy, type FairyBuffer } from './Fairy'
 
 /* ──────────────────────────────────────────────────────────────
    LANDMARKS
@@ -36,6 +39,10 @@ type Ctx = {
   tex: Map<string, THREE.Texture>
   spec: Spec
   r: () => number
+  models: Map<string, GLTF>
+  nightLights: { light: THREE.PointLight; power: number }[]
+  lampMat: THREE.MeshStandardMaterial
+  fairy: FairyBuffer
 }
 
 const FONT = '"Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif'
@@ -130,27 +137,182 @@ function marker(group: THREE.Group, pos: THREE.Vector3, color: string) {
   return ring
 }
 
+
+/* ── models placed on plots ─────────────────────────────────── */
+
+type PlaceOpts = {
+  /** names (regex) of parts to throw away, e.g. sky domes */
+  drop?: RegExp
+  /** parts that should not block the player (glass, doors) */
+  passable?: RegExp
+  /** world height the model's lowest walkable floor should sit at */
+  floor?: number
+}
+
+/**
+ * Put a downloaded building on a plot (plot-local x, z, extra yaw), sitting on the street,
+ * with every non-glass part turned into a trimesh collider so it can be walked through.
+ */
+function placeModel(ctx: Ctx, name: string, lx: number, lz: number, yaw: number, opts: PlaceOpts = {}) {
+  const gltf = ctx.models.get(name)
+  if (!gltf) return null
+  const root = gltf.scene.clone(true)
+  if (opts.drop) {
+    const drop: THREE.Object3D[] = []
+    root.traverse((o) => opts.drop!.test(o.name) && drop.push(o))
+    drop.forEach((o) => o.removeFromParent())
+  }
+  const holder = new THREE.Group()
+  holder.add(root)
+  root.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(root)
+  // floor: the model's own y = 0 is its ground floor in these scenes
+  root.position.y = opts.floor ?? 0.16
+  holder.applyMatrix4(ctx.at(lx, -0.15, lz, yaw))
+  ctx.group.add(holder)
+  holder.updateMatrixWorld(true)
+  root.traverse((o) => {
+    const m = o as THREE.Mesh
+    if (!m.isMesh) return
+    m.castShadow = true
+    m.receiveShadow = true
+    const mat = m.material as THREE.MeshStandardMaterial
+    const pass = opts.passable?.test(m.name + ' ' + (mat?.name ?? '')) || (mat?.transparent && mat.opacity < 0.9) || ((mat as THREE.MeshPhysicalMaterial)?.transmission ?? 0) > 0
+    if (!pass) ctx.physics.fixedMesh(m)
+  })
+  // hundreds of small parts → one draw per material (the colliders were made above)
+  mergeByMaterial(root)
+  return { holder, box }
+}
+
+/** a simple point light that only shines after dark (kept in the scene at 0 so shaders never recompile) */
+function nightLight(ctx: Ctx, lx: number, ly: number, lz: number, color = '#ffd8a8', power = 30, range = 18) {
+  const l = new THREE.PointLight(color, 0, range, 1.6)
+  l.position.setFromMatrixPosition(ctx.at(lx, ly, lz))
+  ctx.group.add(l)
+  ctx.nightLights.push({ light: l, power })
+}
+
+/** low wall around a compound, with a gap for the gate at local x in [g0, g1] on the front */
+function compoundWall(ctx: Ctx, x0: number, x1: number, zBack: number, g0: number, g1: number) {
+  const { b, m } = ctx
+  const h = 2.0
+  const seg = (ax: number, az: number, bx: number, bz: number) => {
+    const len = Math.hypot(bx - ax, bz - az)
+    const cx = (ax + bx) / 2
+    const cz = (az + bz) / 2
+    const yaw = Math.atan2(bx - ax, bz - az)
+    b.box(0.35, h, len, m.plaster[1], ctx.at(cx, h / 2, cz, yaw), 2.5)
+    b.box(0.5, 0.12, len + 0.2, m.trim, ctx.at(cx, h + 0.06, cz, yaw))
+    const p = new THREE.Vector3().setFromMatrixPosition(ctx.at(cx, h / 2, cz))
+    ctx.physics.fixedBox(p.x, h / 2, p.z, 0.2, h / 2, len / 2, plotFrame(ctx.plot).yaw + yaw)
+  }
+  seg(x0, -0.5, g0, -0.5)
+  seg(g1, -0.5, x1, -0.5)
+  seg(x0, -0.5, x0, zBack)
+  seg(x1, -0.5, x1, zBack)
+  seg(x0, zBack, x1, zBack)
+  fairy(ctx, x0, h + 0.15, -0.5, g0, h + 0.15, -0.5, 0.25, false)
+  fairy(ctx, g1, h + 0.15, -0.5, x1, h + 0.15, -0.5, 0.25, false)
+  // gate pillars with lamps
+  for (const gx of [g0, g1]) {
+    b.box(0.8, 2.6, 0.8, m.plaster[1], ctx.at(gx, 1.3, -0.5), 2)
+    b.box(1.0, 0.15, 1.0, m.trim, ctx.at(gx, 2.67, -0.5))
+    b.add(new THREE.SphereGeometry(0.22, 16, 10), ctx.lampMat, ctx.at(gx, 2.95, -0.5))
+  }
+}
+
+/** a sagging string of little bulbs between two plot-local points (shown after dark) */
+function fairy(ctx: Ctx, ax: number, ay: number, az: number, bx: number, by: number, bz: number, sag: number, colour: boolean) {
+  const a = new THREE.Vector3().setFromMatrixPosition(ctx.at(ax, ay, az))
+  const b = new THREE.Vector3().setFromMatrixPosition(ctx.at(bx, by, bz))
+  addFairy(ctx.fairy, a, b, sag, colour)
+}
+
+export const ESTATE = {
+  /** plot-local positions of the garage bays (x), all at z = GARAGE_Z, cars facing the street */
+  bays: [10, 15, 20, 25, 30],
+  garageZ: -12,
+  villa: { x: -18, z: -24 },
+  spawn: { x: 0, z: -6 },
+}
+
 const SPECS: Record<string, Spec> = {
   home: {
     title: 'Akash', sub: 'Home · Garage', accent: '#141218', ink: '#ffc61a',
     build(c) {
       const { b, m } = c
-      // a two-storey house on the left, a garage with the shutter up on the right
-      const house = c.at(-6, 0, -8)
-      const hp = new THREE.Vector3().setFromMatrixPosition(house)
-      townBuilding(b, m, hp.x, hp.z, plotFrame(c.plot).yaw, 12, 14, 2, m.plaster[0], c.r)
-      collider(c, -6, -8, 12, 14, 7)
-      const gw = 9
-      const gd = 12
-      b.box(gw, 0.3, gd, m.concrete, c.at(7, 0.15, -6), 2)
-      b.box(0.3, 4.2, gd, m.brick, c.at(7 - gw / 2, 2.1, -6), 2.5)
-      b.box(0.3, 4.2, gd, m.brick, c.at(7 + gw / 2, 2.1, -6), 2.5)
-      b.box(gw, 4.2, 0.3, m.brick, c.at(7, 2.1, -6 - gd / 2), 2.5)
-      b.box(gw + 0.6, 0.35, gd + 0.6, m.roof, c.at(7, 4.35, -6), 3)
-      b.box(gw, 0.6, 0.3, m.brick, c.at(7, 3.9, -6 + gd / 2), 2.5)
-      for (const [lx, w, d] of [[7 - gw / 2, 0.3, gd], [7 + gw / 2, 0.3, gd]] as const) collider(c, lx, -6, w, d, 4.2)
-      collider(c, 7, -6 - gd / 2, gw, 0.3, 4.2)
-      sign(c, 5.5, -6, 4.1, -0.9)
+      // the compound: wall, gate, a lawn and a paved drive
+      compoundWall(c, -38, 38, -70, -4, 35)
+      b.box(75, 0.03, 68, m.grass, c.at(0, 0.02, -36), 6)
+      b.box(39, 0.04, 6, m.paving, c.at(15.5, 0.035, -3), 2)
+      b.box(30, 0.04, 8, m.paving, c.at(20, 0.035, -8), 2)
+      b.box(6, 0.04, 16, m.paving, c.at(-14, 0.035, -12), 2)
+
+      // garage: polished floor, back and side walls, slim roof on columns, open to the drive
+      const gx = 20
+      const gz = ESTATE.garageZ - 3
+      const W = 28
+      const D = 9
+      const H = 3.6
+      const floor = new THREE.MeshStandardMaterial({ color: '#c9ccd0', roughness: 0.18, metalness: 0.05 })
+      b.box(W, 0.06, D, floor, c.at(gx, 0.03, gz), 3)
+      b.box(W + 0.6, 0.35, D + 0.6, m.plaster[6], c.at(gx, H + 0.17, gz), 3)
+      b.box(W, H, 0.3, m.plaster[6], c.at(gx, H / 2, gz - D / 2), 3)
+      for (const sx of [-1, 1]) b.box(0.3, H, D, m.plaster[6], c.at(gx + (sx * W) / 2, H / 2, gz), 3)
+      for (const bx of ESTATE.bays) {
+        b.box(0.08, 0.005, 5.5, m.line, c.at(bx - 2.5, 0.065, gz))
+        // LED strip over each bay
+        b.box(3.2, 0.05, 0.2, c.lampMat, c.at(bx, H - 0.03, gz))
+      }
+      b.box(0.08, 0.005, 5.5, m.line, c.at(ESTATE.bays[ESTATE.bays.length - 1] + 2.5, 0.065, gz))
+      for (const lx of [gx - W / 2, gx + W / 2]) {
+        const p = new THREE.Vector3().setFromMatrixPosition(c.at(lx, H / 2, gz))
+        c.physics.fixedBox(p.x, H / 2, p.z, 0.15, H / 2, D / 2, plotFrame(c.plot).yaw)
+      }
+      {
+        const p = new THREE.Vector3().setFromMatrixPosition(c.at(gx, H / 2, gz - D / 2))
+        c.physics.fixedBox(p.x, H / 2, p.z, W / 2, H / 2, 0.15, plotFrame(c.plot).yaw)
+      }
+      nightLight(c, gx, H - 0.4, gz, '#f4f1ff', 40, 20)
+
+      // the bungalow: the downloaded villa, closed with a glass front and a clad shell
+      const v = ESTATE.villa
+      const placed = placeModel(c, 'bungalow', v.x, v.z, 0, { drop: /^Sphere/, passable: /glass|window/i, floor: 0.24 })
+      if (placed) {
+        // villa interior spans x -3.3..7.8, z -6.1..6.1 in its own frame
+        const x0 = v.x - 3.5
+        const x1 = v.x + 8.1
+        const zf = v.z + 6.3
+        const zb = v.z - 6.3
+        const cx = (x0 + x1) / 2
+        const w = x1 - x0
+        const stone = m.granite
+        // roof slab with overhang, back wall, stone-clad side walls
+        b.box(w + 2, 0.45, zf - zb + 2.4, m.trim, c.at(cx, 5.25, (zf + zb) / 2 + 0.6), 3)
+        b.box(w, 5, 0.3, stone, c.at(cx, 2.5, zb), 2)
+        for (const sx of [x0, x1]) b.box(0.3, 5, zf - zb, stone, c.at(sx, 2.5, (zf + zb) / 2), 2)
+        // glass front with an open sliding door in the middle
+        const glass = new THREE.MeshStandardMaterial({ color: '#a9c4d6', metalness: 0.6, roughness: 0.05, transparent: true, opacity: 0.32, depthWrite: false })
+        const door = 2.2
+        for (const [a, bb] of [[x0, cx - door / 2], [cx + door / 2, x1]]) {
+          b.add(new THREE.PlaneGeometry(bb - a, 4.8), glass, c.at((a + bb) / 2, 2.4, zf))
+          for (let x = a; x <= bb + 0.01; x += (bb - a) / 3) b.box(0.08, 4.8, 0.12, m.frame, c.at(x, 2.4, zf))
+          const p = new THREE.Vector3().setFromMatrixPosition(c.at((a + bb) / 2, 2.4, zf))
+          c.physics.fixedBox(p.x, 2.4, p.z, (bb - a) / 2, 2.4, 0.1, plotFrame(c.plot).yaw)
+        }
+        b.box(w, 0.1, 0.14, m.frame, c.at(cx, 4.8, zf))
+        for (const [lx, lz] of [[cx, zb], [x0, (zf + zb) / 2], [x1, (zf + zb) / 2]]) {
+          const p = new THREE.Vector3().setFromMatrixPosition(c.at(lx, 2.5, lz))
+          const along = lz === zb
+          c.physics.fixedBox(p.x, 2.5, p.z, along ? w / 2 : 0.15, 2.5, along ? 0.15 : (zf - zb) / 2, plotFrame(c.plot).yaw)
+        }
+        // a step and a porch light
+        b.box(door + 1.4, 0.12, 1.2, m.granite, c.at(cx, 0.06, zf + 0.6), 2)
+        fairy(c, x0 - 1, 5.0, zf + 1.4, x1 + 1, 5.0, zf + 1.4, 0.35, true)
+        nightLight(c, cx + 2, 4.2, (zf + zb) / 2, '#ffd8a8', 34, 16)
+      }
+      sign(c, 5.5, -26, 2.4, -0.1)
     },
   },
   egra: {
@@ -196,14 +358,17 @@ const SPECS: Record<string, Spec> = {
   xeta: {
     title: 'Xeta Labs', sub: 'Assam · Intern 2024 → Full-stack 2025', accent: '#0d1620', ink: '#3fe0b8',
     build(c) {
-      const { b, m } = c
+      const placed = placeModel(c, 'office', 0, -12, 0, { passable: /glass|window|door/i })
+      const { b } = c
       const neon = new THREE.MeshStandardMaterial({ color: '#3fe0b8', emissive: '#3fe0b8', emissiveIntensity: 1.2 })
-      const h = glassTower(c, 26, 18, 7, m.glass, m.frame)
-      for (const [x, z] of [[-13, 0], [13, 0], [-13, -18], [13, -18]]) b.box(0.18, h, 0.18, neon, c.at(x, h / 2, z))
-      for (let f = 1; f < 7; f++) b.box(26.2, 0.08, 0.08, neon, c.at(0, f * 3.6, 0.06))
-      b.box(10, 0.3, 6, m.frame, c.at(0, 4.2, 3))
-      collider(c, 0, -9, 26, 18, h)
-      sign(c, 14, 0, h + 1.8, -1)
+      if (placed) {
+        // teal neon outline along the roof edge and a rooftop sign
+        b.box(15.6, 0.12, 0.12, neon, c.at(0.4, 5.55, -12 + 7.3))
+        b.box(15.6, 0.12, 0.12, neon, c.at(0.4, 5.55, -12 - 4.6))
+        nightLight(c, 0, 3.6, -12, '#d8fff4', 30, 18)
+      }
+      sign(c, 12, 0, 7.4, -6)
+      screen(c, 8, -10, 3.4, -3)
     },
   },
   picaku: {
@@ -244,13 +409,16 @@ const SPECS: Record<string, Spec> = {
   gobt: {
     title: 'GOBT', sub: 'Group Of Blooming Technicians · HQ', accent: '#141218', ink: '#e8b923', logo: 'img/logos/gobt.webp', screen: 'img/tex/gobt.webp',
     build(c) {
-      const { b, m } = c
-      const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.9, roughness: 0.3 })
-      const h = glassTower(c, 22, 22, 12, m.glass, gold)
-      b.box(24, 1.2, 24, gold, c.at(0, h + 0.6, -11))
-      collider(c, 0, -11, 22, 22, h)
-      sign(c, 14, 0, 5.2, 0.3)
-      screen(c, 12, 0, 12, 0.3)
+      // the GOBT campus: HQ office in the middle, apartment towers around a landscaped court
+      const placed = placeModel(c, 'campus', 0, -40, 0, { passable: /glass|window|door/i, floor: 0.66 })
+      const { b } = c
+      const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.9, roughness: 0.3, emissive: '#e8a313', emissiveIntensity: 0.2 })
+      if (placed) {
+        b.box(16, 0.18, 0.18, gold, c.at(0.4, 5.75, -40 + 7.4))
+        nightLight(c, 0, 3.6, -40, '#ffe6b0', 30, 18)
+      }
+      sign(c, 14, 0, 3.2, -8)
+      screen(c, 12, 14, 4.2, -9)
     },
   },
   gharkamali: {
@@ -371,7 +539,11 @@ export class Landmarks {
   private markers: THREE.Mesh[] = []
   private signMats: THREE.MeshStandardMaterial[] = []
 
-  constructor(private physics: Physics, private mats: Materials, private tex: Map<string, THREE.Texture>) {}
+  readonly nightLights: { light: THREE.PointLight; power: number }[] = []
+  readonly fairy: FairyBuffer = { pos: [], col: [] }
+  private lampMat = new THREE.MeshStandardMaterial({ color: '#fff6e0', emissive: '#ffe2b0', emissiveIntensity: 0.2 })
+
+  constructor(private physics: Physics, private mats: Materials, private tex: Map<string, THREE.Texture>, private models: Map<string, GLTF>) {}
 
   build() {
     const b = new Batch()
@@ -382,7 +554,7 @@ export class Landmarks {
       const f = plotFrame(plot)
       const base = M(f.x, 0.15, f.z, f.yaw)
       const at = (lx: number, ly: number, lz: number, yaw = 0) => base.clone().multiply(M(lx, ly, lz, yaw))
-      const ctx: Ctx = { b, m: this.mats, plot, at, physics: this.physics, group: this.group, tex: this.tex, spec, r }
+      const ctx: Ctx = { b, m: this.mats, plot, at, physics: this.physics, group: this.group, tex: this.tex, spec, r, models: this.models, nightLights: this.nightLights, lampMat: this.lampMat, fairy: this.fairy }
       const before = this.group.children.length
       spec.build(ctx)
       for (const o of this.group.children.slice(before)) {
@@ -397,6 +569,8 @@ export class Landmarks {
   }
 
   update(t: number, night: number) {
+    for (const n of this.nightLights) n.light.intensity = night > 0.3 ? n.power * night : 0
+    this.lampMat.emissiveIntensity = 0.2 + (night > 0.3 ? night * 4 : 0)
     for (const [i, mk] of this.markers.entries()) {
       const s = 1 + Math.sin(t * 2.4 + i) * 0.06
       mk.scale.set(s, 1, s)

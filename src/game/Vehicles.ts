@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
-import { ambassador, type Ambassador } from './Ambassador'
+import { ambassador } from './Ambassador'
+import { mergeByMaterial } from './merge'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RAPIER, type Physics } from './Physics'
 import type { Input } from './Input'
@@ -26,27 +27,27 @@ export class Car {
   private readonly prevQ = new THREE.Quaternion()
   private readonly currQ = new THREE.Quaternion()
   readonly seat = new THREE.Vector3(-0.35, 0.55, 0.1)
-  private beams: THREE.SpotLight[] = []
   /** where the driver steps out (car-local) */
   readonly exit = new THREE.Vector3(-1.9, 0, 0.2)
 
-  private amb: Ambassador
+  private amb: { model: THREE.Group; setNight: (n: number, braking?: boolean) => void }
+  /** top speed (m/s) and engine force; supercars get a lot more */
+  readonly profile: { name: string; max: number; boost: number; force: number }
   private radius = 0.45
   private connY = 0
 
-  constructor(physics: Physics, pos: THREE.Vector3, yaw: number) {
-    this.amb = ambassador()
+  constructor(
+    physics: Physics,
+    pos: THREE.Vector3,
+    yaw: number,
+    visual?: { model: THREE.Group; setNight: (n: number, braking?: boolean) => void },
+    profile = { name: 'Ambassador taxi', max: 28, boost: 42, force: 3200 },
+  ) {
+    this.amb = visual ?? ambassador()
+    this.profile = profile
     const model = this.amb.model
     this.root.add(model)
     model.updateMatrixWorld(true)
-    // headlights (the model's nose points along -Z)
-    for (const x of [-0.6, 0.6]) {
-      const s = new THREE.SpotLight('#fff1d2', 0, 45, 0.5, 0.55, 1.2)
-      s.position.set(x, 0.65, -2.1)
-      s.target.position.set(x * 1.6, 0, -14)
-      this.root.add(s, s.target)
-      this.beams.push(s)
-    }
     for (const n of ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']) {
       const w = model.getObjectByName(n)!
       this.wheels.push(w)
@@ -114,10 +115,10 @@ export class Car {
     if (input && this.occupied) {
       const thr = input.move.y
       steerTarget = -input.move.x * 0.55 / (1 + Math.abs(speed) * 0.05)
-      const max = input.sprint ? 42 : 28 // m/s
+      const max = input.sprint ? this.profile.boost : this.profile.max // m/s
       if (thr > 0.05) {
         if (speed < -1) brake = 40 * thr
-        else if (speed < max) engine = 3200 * thr * (input.sprint ? 1.4 : 1)
+        else if (speed < max) engine = this.profile.force * thr * (input.sprint ? 1.4 : 1)
       } else if (thr < -0.05) {
         if (speed > 1) brake = 40 * -thr
         else if (speed > -10) engine = -2000 * -thr
@@ -147,7 +148,6 @@ export class Car {
   }
 
   setLights(night: number) {
-    for (const b of this.beams) b.intensity = night > 0.3 ? 60 * night : 0
     this.amb.setNight(night, this.occupied && this.speed > 0.5 && this.braking)
   }
 
@@ -200,7 +200,10 @@ export class Bike {
     this.rear = this.model.getObjectByName('RadHinten') ?? null
     this.pedals = this.model.getObjectByName('Pedale') ?? null
     this.bars = this.model.getObjectByName('Lenker') ?? null
-    mergeStatic(this.model, [this.front, this.rear, this.pedals, this.bars].filter(Boolean) as THREE.Object3D[])
+    const moving = [this.front, this.rear, this.pedals, this.bars].filter(Boolean) as THREE.Object3D[]
+    mergeStatic(this.model, moving)
+    // the moving parts can't join the body, but each can still be one draw per material
+    for (const part of moving) mergeByMaterial(part, moving.filter((o) => o !== part))
     // the model runs along X; turn it so the bike faces +Z
     this.model.rotation.y = -Math.PI / 2
     this.root.add(this.model)

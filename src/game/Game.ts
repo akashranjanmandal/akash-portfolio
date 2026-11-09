@@ -7,16 +7,21 @@ import { Player } from './Player'
 import { World } from './World'
 import { Car, Bike, nearestVehicle, type Vehicle } from './Vehicles'
 import { PLOTS, plotToWorld, plotFrame } from './city/Plan'
+import { ESTATE } from './city/Landmarks'
+import { GARAGE, buildSupercar } from './Supercar'
 import * as THREE from 'three'
 
 export const MODELS = [
-  'avatar', 'xbot-anims', 'bike', 'tram', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
+  'avatar', 'xbot-anims', 'bike', 'tram', 'car-bugatti', 'car-jesko', 'car-lambo', 'car-bmw', 'bungalow', 'office', 'campus', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
   'rollershutter_door', 'painted_wooden_bench', 'metal_trash_can', 'fire_hydrant', 'planter_box_01', 'concrete_road_barrier', 'potted_plant_01',
 ]
 export const IMAGES = ['picaku', 'lifeapp', 'pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'mastermind', 'gftd', 'agile', 'ideashapers']
   .map((s) => `img/tex/${s}.webp`)
   .concat(['pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'gftd', 'agile'].map((s) => `img/logos/${s}.webp`))
-export const TEXTURES = ['aerial_grass_rock', 'asphalt_02', 'concrete_tiles', 'red_brick_03', 'plastered_wall_02', 'coast_sand_rocks_02', 'forrest_ground_01', 'metal_plate', 'rocky_terrain_02']
+export const TEXTURES = [
+  'aerial_grass_rock', 'asphalt_02', 'concrete_tiles', 'red_brick_03', 'plastered_wall_02', 'coast_sand_rocks_02', 'forrest_ground_01', 'metal_plate', 'rocky_terrain_02',
+  'beige_wall_001', 'painted_concrete', 'concrete_wall_008', 'white_plaster_02', 'brick_wall_10', 'corrugated_iron_02', 'wood_planks', 'granite_tile', 'marble_01', 'cobblestone_floor_08',
+]
 
 /** The open-world game: loads everything, then runs player / vehicles / camera each frame. */
 export class Game {
@@ -28,6 +33,8 @@ export class Game {
   player!: Player
   world!: World
   vehicles: Vehicle[] = []
+  /** one pair of headlights, moved onto whichever car is being driven */
+  private beams: THREE.SpotLight[] = []
   onPrompt?: (text: string | null) => void
   private prompt: string | null = null
 
@@ -55,20 +62,35 @@ export class Game {
     onProgress(1)
   }
 
-  /** the taxi waits in the home garage; bicycles lean on a rack outside */
+  /** the garage: the Ambassador taxi and Akash's supercars, all ready to drive; bicycles by the gate */
   private spawnVehicles() {
     const home = PLOTS.find((p) => p.id === 'home')!
     const f = plotFrame(home)
-    const carPos = plotToWorld(home, 6, -7)
-    const car = new Car(this.physics, new THREE.Vector3(carPos.x, 0.2, carPos.z), f.yaw + Math.PI) // nose out, towards the street
-    this.vehicles.push(car)
-    for (const [i, lx] of [-11, -12.6].entries()) {
-      const p = plotToWorld(home, lx, 3)
-      const bike = new Bike(this.physics, this.assets.models.get('bike')!, new THREE.Vector3(p.x, 0.2, p.z), f.yaw + Math.PI / 2 + i * 0.05)
-      this.vehicles.push(bike)
+    // noses towards the street
+    const yaw = Math.atan2(-f.fx, -f.fz)
+    const bayZ = ESTATE.garageZ - 3
+    const taxiPos = plotToWorld(home, ESTATE.bays[0], bayZ)
+    this.vehicles.push(new Car(this.physics, new THREE.Vector3(taxiPos.x, 0.2, taxiPos.z), yaw))
+    GARAGE.forEach((spec, i) => {
+      const gltf = this.assets.models.get(spec.model)
+      if (!gltf) return
+      const p = plotToWorld(home, ESTATE.bays[i + 1], bayZ)
+      const visual = buildSupercar(gltf, spec)
+      this.vehicles.push(new Car(this.physics, new THREE.Vector3(p.x, 0.2, p.z), yaw, visual, { name: spec.name, max: 50, boost: 78, force: 6200 }))
+    })
+    for (const [i, lx] of [-1, 0.6].entries()) {
+      const p = plotToWorld(home, lx, -10)
+      this.vehicles.push(new Bike(this.physics, this.assets.models.get('bike')!, new THREE.Vector3(p.x, 0.2, p.z), f.yaw + Math.PI / 2 + i * 0.05))
     }
     for (const v of this.vehicles) this.engine.scene.add(v.root)
     this.world.obstacles = this.vehicles.map((v) => v.position)
+    for (const x of [-0.6, 0.6]) {
+      const s = new THREE.SpotLight('#fff1d2', 0, 50, 0.5, 0.55, 1.2)
+      s.position.set(x, 0.7, -2.2)
+      s.target.position.set(x * 1.6, 0, -16)
+      this.beams.push(s)
+      this.engine.scene.add(s, s.target)
+    }
   }
 
   start() {
@@ -110,6 +132,11 @@ export class Game {
     this.env.follow(focus)
     this.world.night = this.env.night
     for (const v of this.vehicles) if (v.kind === 'car') (v as Car).setLights(this.env.night)
+    const driving = p.vehicle?.kind === 'car' ? p.vehicle : null
+    for (const s of this.beams) {
+      s.intensity = driving && this.env.night > 0.3 ? 70 * this.env.night : 0
+      if (driving && s.parent !== driving.root) driving.root.add(s, s.target)
+    }
     this.world.update(dt, t, focus)
   }
 }

@@ -45,7 +45,20 @@ export class Assets {
       }),
       ...models.map(async (name) => {
         try {
-          this.models.set(name, await this.gltf.loadAsync(`${BASE}models/${name}.glb`))
+          const g = await this.gltf.loadAsync(`${BASE}models/${name}.glb`)
+          // refractive (transmission) glass makes three.js render the whole scene twice per
+          // frame; a tinted transparent pane looks nearly the same and costs nothing extra
+          g.scene.traverse((o) => {
+            const m = (o as THREE.Mesh).material as THREE.MeshPhysicalMaterial | undefined
+            if (m && m.transmission > 0) {
+              m.transmission = 0
+              m.transparent = true
+              m.opacity = Math.min(m.opacity, 0.35)
+              m.depthWrite = false
+              m.roughness = Math.min(m.roughness, 0.1)
+            }
+          })
+          this.models.set(name, g)
         } catch (e) {
           console.warn('model failed', name, e)
         }

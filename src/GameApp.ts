@@ -73,7 +73,7 @@ export class GameApp {
     await this.loader.hide()
     document.body.classList.add('is-ready')
     if (!isTouch) $('lockhint').classList.add('is-on')
-    this.toasts.show('🏠', 'You’re home. The taxi is in the garage — bicycles are outside.', 5200)
+    this.toasts.show('🏠', 'You’re home. Your cars are in the garage — walk up to one and hop in.', 5200)
     window.setTimeout(() => this.toasts.show('📱', isTouch ? 'Tap Phone for projects, the map and contact.' : 'Press Tab for your phone: projects, map, contact.', 5200), 5600)
   }
 
@@ -102,7 +102,8 @@ export class GameApp {
     const modes = ['day', 'golden', 'night'] as const
     const labels = { day: 'Day', golden: 'Golden hour', night: 'Night' }
     const saved = storage.get('akash:time') as (typeof modes)[number] | null
-    if (saved && modes.includes(saved)) g.env.setTime(saved)
+    // Kolkata looks its best after dark: night is the default until the visitor picks otherwise
+    g.env.setTime(saved && modes.includes(saved) ? saved : 'night')
     const sync = () => ($('btn-time-label').textContent = labels[g.env.mode])
     sync()
     timeBtn.addEventListener('click', () => {

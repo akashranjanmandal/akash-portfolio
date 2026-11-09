@@ -16,8 +16,8 @@ export type Quality = {
 }
 
 const PRESETS: Record<Tier, Omit<Quality, 'tier'>> = {
-  high: { dprMax: 1.5, shadows: true, shadowSize: 4096, ao: true, bloom: true, drawDistance: 900, density: 1 },
-  mid: { dprMax: 1.25, shadows: true, shadowSize: 2048, ao: false, bloom: true, drawDistance: 600, density: 0.6 },
+  high: { dprMax: 1.5, shadows: true, shadowSize: 2048, ao: true, bloom: true, drawDistance: 900, density: 1 },
+  mid: { dprMax: 1.25, shadows: true, shadowSize: 1024, ao: false, bloom: true, drawDistance: 600, density: 0.6 },
   low: { dprMax: 1, shadows: true, shadowSize: 1024, ao: false, bloom: false, drawDistance: 400, density: 0.35 },
 }
 

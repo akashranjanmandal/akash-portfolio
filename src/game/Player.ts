@@ -77,7 +77,7 @@ export class Player {
     this.controller.setUp({ x: 0, y: 1, z: 0 })
     this.controller.setMaxSlopeClimbAngle(THREE.MathUtils.degToRad(48))
     this.controller.setMinSlopeSlideAngle(THREE.MathUtils.degToRad(55))
-    this.controller.enableAutostep(0.45, 0.25, true)
+    this.controller.enableAutostep(0.6, 0.2, true)
     this.controller.enableSnapToGround(0.4)
     this.controller.setApplyImpulsesToDynamicBodies(true)
     const t = this.body.translation()

@@ -66,6 +66,18 @@ export class Traffic {
   private drivers: Driver[] = []
   private parked: Ambassador[] = []
   private readonly tmp = new THREE.Vector3()
+  private poolMat = (() => {
+    const c = document.createElement('canvas')
+    c.width = 64
+    c.height = 128
+    const g = c.getContext('2d')!
+    const grd = g.createRadialGradient(32, 120, 4, 32, 70, 70)
+    grd.addColorStop(0, 'rgba(255,240,210,0.9)')
+    grd.addColorStop(1, 'rgba(255,240,210,0)')
+    g.fillStyle = grd
+    g.fillRect(0, 0, 64, 128)
+    return new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 })
+  })()
 
   constructor(physics: Physics, count: number) {
     const r = rng(1234)
@@ -81,6 +93,11 @@ export class Traffic {
       for (let k = 1; k <= path.length; k++) dist.push(dist[k - 1] + path[k - 1].distanceTo(path[k % path.length]))
       const car = ambassador()
       this.group.add(car.model)
+      // a soft pool of headlight on the road ahead, only after dark
+      const pool = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 9).rotateX(-Math.PI / 2), this.poolMat)
+      pool.position.set(0, 0.05, -6.6)
+      pool.renderOrder = 1
+      car.model.add(pool)
       const body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased())
       physics.world.createCollider(RAPIER.ColliderDesc.cuboid(0.85, 0.7, 2.2).setTranslation(0, 0.8, 0), body)
       const length = dist[path.length]
@@ -151,8 +168,13 @@ export class Traffic {
         if (w) w.rotation.x -= spin
       }
       d.car.setNight(night, block)
+      d.car.model.visible = Math.abs(pos.x - player.x) < 110 && Math.abs(pos.z - player.z) < 110
     }
-    for (const p of this.parked) p.setNight(night * 0.2)
+    this.poolMat.opacity = night > 0.3 ? 0.5 * night : 0
+    for (const p of this.parked) {
+      p.setNight(night * 0.2)
+      p.model.visible = Math.abs(p.model.position.x - player.x) < 110 && Math.abs(p.model.position.z - player.z) < 110
+    }
   }
 
   get positions() {

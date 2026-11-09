@@ -4,6 +4,7 @@ import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
 import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame } from './Plan'
 import { rng } from '../../utils/math'
+import { addFairy, FairyLights, type FairyBuffer } from './Fairy'
 import { kerbStripes, wires, tramLine, Tram, streetLife, victoriaMemorial } from './Kolkata'
 
 /* Roads, kerbs, pavements, street lights and the ordinary buildings
@@ -173,11 +174,44 @@ export function townMaterials(a: Assets) {
     yellowLine: new THREE.MeshStandardMaterial({ color: '#e4b42c', roughness: 0.7 }),
     glass,
     glassLit,
+    shopGlass: shopInterior(),
   }
 }
 
+/** a shop interior seen through the glass: shelves, goods and a warm fall-off, not a flat lightbox */
+function shopInterior() {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 128
+  const g = c.getContext('2d')!
+  const grd = g.createLinearGradient(0, 0, 0, 128)
+  grd.addColorStop(0, '#6b5434')
+  grd.addColorStop(0.35, '#3c2f20')
+  grd.addColorStop(1, '#17120c')
+  g.fillStyle = grd
+  g.fillRect(0, 0, 256, 128)
+  // shelves stocked with goods in muted colours
+  const goods = ['#7a4b2a', '#4f6b3a', '#8a6a30', '#5a3d5c', '#3d5470', '#844030']
+  for (let y = 22; y < 100; y += 26) {
+    g.fillStyle = '#20180f'
+    g.fillRect(8, y + 16, 240, 3)
+    for (let x = 10; x < 246; x += 7 + ((x * 7) % 5)) {
+      g.fillStyle = goods[(x + y) % goods.length]
+      g.fillRect(x, y + 4 + ((x * 3) % 6), 5, 12 - ((x * 3) % 6))
+    }
+  }
+  // the tube light near the ceiling and a counter in front
+  g.fillStyle = '#f3e3c0'
+  g.fillRect(60, 6, 136, 3)
+  g.fillStyle = '#0d0a07'
+  g.fillRect(0, 104, 256, 24)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return new THREE.MeshStandardMaterial({ color: '#222', map: t, roughness: 0.15, metalness: 0.3, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 0.15 })
+}
+
 /** a mid-rise town building with windows, cornices, a parapet and roof clutter */
-export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: number, w: number, d: number, floors: number, wall: THREE.Material, r: () => number, opts: { shop?: boolean } = {}) {
+export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: number, w: number, d: number, floors: number, wall: THREE.Material, r: () => number, opts: { shop?: boolean; fairy?: FairyBuffer } = {}) {
   const h = floors * FLOOR + 0.4
   const base = M(x, 0, z, yaw)
   const at = (lx: number, ly: number, lz: number, ryaw = 0) => base.clone().multiply(M(lx, ly, lz, ryaw))
@@ -254,7 +288,7 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
   if (opts.shop) {
     // a glazed shopfront with a canopy on the street side
     b.box(w - 1, 2.8, 0.1, m.frame, at(0, 1.5, d / 2 + 0.02))
-    b.add(new THREE.PlaneGeometry(w - 1.4, 2.5), m.glassLit, at(0, 1.5, d / 2 + 0.08))
+    b.add(new THREE.PlaneGeometry(w - 1.4, 2.5), m.shopGlass, at(0, 1.5, d / 2 + 0.08))
     // a hand-painted signboard and a faded canvas awning
     const sw = Math.min(w - 0.6, 9)
     const sign = new THREE.PlaneGeometry(sw, 1.05)
@@ -265,6 +299,13 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
     b.box(sw + 0.2, 1.2, 0.1, m.frame, at(0, 3.75, d / 2 + 0.05))
     const awn = new THREE.Matrix4().makeRotationX(0.42)
     b.box(w - 0.4, 0.04, 1.8, m.awning, at(0, 2.95, d / 2 + 0.85).multiply(awn), 1.2)
+  }
+  // festival lights strung across the front of some buildings
+  if (opts.fairy && r() < 0.4) {
+    const pt = (lx: number, ly: number, lz: number) => new THREE.Vector3().setFromMatrixPosition(at(lx, ly, lz))
+    const colour = r() < 0.6
+    addFairy(opts.fairy, pt(-w / 2, h + 0.3, d / 2 + 0.2), pt(w / 2, h + 0.3, d / 2 + 0.2), 0.5, colour)
+    if (floors > 2 && r() < 0.5) addFairy(opts.fairy, pt(-w / 2, FLOOR + 0.3, d / 2 + 0.2), pt(w / 2, FLOOR + 0.3, d / 2 + 0.2), 0.4, colour)
   }
   // roof clutter: water tanks and a stair head
   const tanks = 1 + Math.floor(r() * 2)
@@ -285,6 +326,8 @@ export class Town {
   }
 
   tram: Tram | null = null
+  readonly fairyBuf: FairyBuffer = { pos: [], col: [] }
+  fairy: FairyLights | null = null
   update(dt: number) {
     this.tram?.update(dt)
   }
@@ -387,7 +430,7 @@ export class Town {
             if (Math.abs(along) > BLOCK_HALF - 9 - w / 2) continue
             const floors = 2 + Math.floor(r() * 4)
             const wall = r() < 0.2 ? m.brick : r() < 0.15 ? m.concrete : m.plaster[Math.floor(r() * m.plaster.length)]
-            townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.55 })
+            townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.55, fairy: this.fairyBuf })
             this.physics.fixedBox(ox, (floors * FLOOR) / 2, oz, (fz !== 0 ? w : d) / 2, (floors * FLOOR) / 2, (fz !== 0 ? d : w) / 2)
             occupied.push({ x: ox, z: oz, r: Math.max(w, d) / 2 })
           }
@@ -461,11 +504,16 @@ export class Town {
   }
 
   setNight(n: number) {
+    // after dark the roads read as freshly washed: smoother, so lamps glint on them
+    const wet = n > 0.3 ? n : 0
+    this.mats.asphalt.roughness = 1 - wet * 0.55
+    this.mats.asphalt.metalness = wet * 0.15
     if (this.lampGlass) this.lampGlass.emissiveIntensity = n > 0.3 ? 9 * n : 0
     if (this.pools) {
       this.pools.visible = n > 0.3
       ;(this.pools.material as THREE.MeshBasicMaterial).opacity = n * 0.55
     }
-    this.mats.glassLit.emissiveIntensity = n * 0.75
+    this.mats.glassLit.emissiveIntensity = n * 0.38
+    this.mats.shopGlass.emissiveIntensity = 0.12 + n * 0.75
   }
 }

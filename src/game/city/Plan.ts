@@ -25,7 +25,7 @@ export type Plot = {
 }
 
 export const PLOTS: Plot[] = [
-  { id: 'home', cx: -50, cz: 150, face: 'n', w: 26, d: 18 },
+  { id: 'home', cx: -50, cz: 150, face: 'n', w: 80, d: 80 },
   { id: 'egra', cx: -150, cz: 150, face: 'n', w: 34, d: 16 },
   { id: 'neotia', cx: -150, cz: 50, face: 'e', w: 44, d: 22 },
   { id: 'first-jobs', cx: -150, cz: -50, face: 'e', w: 22, d: 16 },
@@ -33,7 +33,7 @@ export const PLOTS: Plot[] = [
   { id: 'picaku', cx: -150, cz: -150, face: 's', w: 14, d: 12 },
   { id: 'lifeapp', cx: -150, cz: -150, face: 'n', w: 14, d: 12 },
   { id: 'pizzahap', cx: -50, cz: -150, face: 's', w: 20, d: 16 },
-  { id: 'gobt', cx: 50, cz: -150, face: 's', w: 26, d: 26 },
+  { id: 'gobt', cx: 50, cz: -150, face: 's', w: 80, d: 80 },
   { id: 'gharkamali', cx: 150, cz: -150, face: 'w', w: 30, d: 22 },
   { id: 'altaqwa', cx: 150, cz: -50, face: 'w', w: 18, d: 14 },
   { id: 'accurateastro', cx: 150, cz: 50, face: 'w', w: 22, d: 22 },
@@ -70,9 +70,12 @@ export function plotToWorld(p: Plot, lx: number, lz: number) {
 
 export const SPAWN = (() => {
   const home = PLOTS[0]
-  const p = plotToWorld(home, 2, 12)
-  // standing across the pavement, looking at the house and the open garage
-  return { x: p.x, z: p.z, yaw: Math.PI - 0.25 }
+  // inside the compound by the gate, looking at the garage
+  const p = plotToWorld(home, 4, -3)
+  const g = plotToWorld(home, 20, -15)
+  const dx = g.x - p.x
+  const dz = g.z - p.z
+  return { x: p.x, z: p.z, yaw: Math.atan2(-dx, -dz) }
 })()
 
 /** famous places that aren't portfolio stops but deserve a waypoint */

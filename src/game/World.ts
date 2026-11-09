@@ -7,6 +7,7 @@ import { Forest } from './Foliage'
 import { Town } from './city/Town'
 import { Howrah, riverDepth, STATION } from './city/Howrah'
 import { Traffic, kerbSpots } from './Traffic'
+import { FairyLights } from './city/Fairy'
 import { Landmarks } from './city/Landmarks'
 import { PLOTS, plotFrame, SPAWN, SIGHTS } from './city/Plan'
 
@@ -81,6 +82,7 @@ export class World {
   landmarks!: Landmarks
   howrah!: Howrah
   traffic!: Traffic
+  fairy!: FairyLights
   /** positions the traffic should brake for besides the player (e.g. the player's taxi) */
   obstacles: THREE.Vector3[] = []
   night = 0
@@ -114,7 +116,7 @@ export class World {
     this.lampGlow = new THREE.Points(hg, new THREE.PointsMaterial({ map: new THREE.CanvasTexture(halo), color: '#ffffff', size: 3.2, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }))
     this.lampGlow.visible = false
     this.group.add(this.lampGlow)
-    const count = this.quality.tier === 'high' ? 6 : this.quality.tier === 'mid' ? 4 : 0
+    const count = this.quality.tier === 'high' ? 4 : this.quality.tier === 'mid' ? 2 : 0
     for (let i = 0; i < count; i++) {
       const l = new THREE.PointLight('#ffc87a', 0, 26, 1.6)
       this.lampLights.push(l)
@@ -136,10 +138,13 @@ export class World {
     this.traffic.park(kerbSpots(PLOTS.map((p) => plotFrame(p)), 14), this.physics)
     this.group.add(this.traffic.group)
     this.group.add(this.howrah.group)
-    this.landmarks = new Landmarks(this.physics, this.town.mats, this.assets.images)
+    this.landmarks = new Landmarks(this.physics, this.town.mats, this.assets.images, this.assets.models)
     this.landmarks.build()
     for (const s of SIGHTS) this.landmarks.spots.push({ id: s.id, title: s.label, sub: s.sub, pos: new THREE.Vector3(s.x, 0, s.z), yaw: 0 })
     this.group.add(this.landmarks.group)
+    // one point cloud for every fairy-light string in town and on the landmarks
+    this.fairy = new FairyLights({ pos: [...this.town.fairyBuf.pos, ...this.landmarks.fairy.pos], col: [...this.town.fairyBuf.col, ...this.landmarks.fairy.col] })
+    this.group.add(this.fairy.points)
     this.scatter()
   }
 
@@ -299,6 +304,7 @@ export class World {
     this.forest?.update(player)
     this.landmarks.update(t, this.night)
     this.howrah.update(this.night)
+    this.fairy.update(t, this.night)
     this.town.setNight(this.night)
     const lit = this.night > 0.3
     this.lampGlow.visible = lit
