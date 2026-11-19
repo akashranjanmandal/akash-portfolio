@@ -91,6 +91,16 @@ export class Car {
     this.currQ.copy(this.prevQ)
   }
 
+  /** put the car somewhere else, at rest (yaw: rotation about Y, 0 = nose to the north) */
+  teleport(pos: THREE.Vector3, yaw: number) {
+    this.body.setTranslation({ x: pos.x, y: pos.y + 0.8, z: pos.z }, true)
+    this.body.setRotation(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), true)
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    this.speed = 0
+    this.snap()
+  }
+
   /** heading of the car's nose (the model faces -Z) */
   get yaw() {
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(this.root.quaternion)
@@ -265,6 +275,17 @@ export class Bike {
 
   setCollision(on: boolean) {
     this.collider.setEnabled(on)
+  }
+
+  /** put the bike somewhere else, at rest (yaw: 0 = heading north) */
+  teleport(pos: THREE.Vector3, yaw: number) {
+    this.body.setTranslation({ x: pos.x, y: pos.y + 0.6, z: pos.z }, true)
+    this.body.setNextKinematicTranslation({ x: pos.x, y: pos.y + 0.6, z: pos.z })
+    this.heading = yaw + Math.PI
+    this.speed = 0
+    this.velY = 0
+    this.prevP.set(pos.x, pos.y + 0.6, pos.z)
+    this.currP.copy(this.prevP)
   }
 }
 

@@ -11,6 +11,8 @@ export type MapState = {
   vehicles: { kind: string; x: number; z: number }[]
   waypoint: string | null
   visited: Set<string>
+  /** in the hills: a rendered map of the region, in world metres */
+  hills?: { bg: HTMLCanvasElement; x0: number; z0: number; w: number; h: number }
 }
 
 // the view covers the river, the station on the far bank, the town and the memorial to the north
@@ -118,10 +120,22 @@ export class WorldMap {
       this.canvas.style.width = this.canvas.style.height = px + 'px'
     }
     const c = this.canvas.getContext('2d')!
-    const k = S / SPAN
-    const PX = (v: number) => (v - CX + SPAN / 2) * k
-    const PZ = (v: number) => (v - CZ + SPAN / 2) * k
+    const s = this.state()
+    const hh = s.hills
+    // the city fits a square; the hills are a long strip, so scale to the long side and centre
+    const k = hh ? S / hh.h : S / SPAN
+    const PX = hh ? (v: number) => (v - hh.x0) * k + (S - hh.w * k) / 2 : (v: number) => (v - CX + SPAN / 2) * k
+    const PZ = hh ? (v: number) => (v - hh.z0) * k : (v: number) => (v - CZ + SPAN / 2) * k
     c.clearRect(0, 0, S, S)
+    if (hh) {
+      c.fillStyle = '#101820'
+      c.fillRect(0, 0, S, S)
+      c.drawImage(hh.bg, PX(hh.x0), PZ(hh.z0), hh.w * k, hh.h * k)
+    } else this.cityBackground(c, S, k, PX, PZ)
+    this.labels(c, s, px, dpr, S, PX, PZ)
+  }
+
+  private cityBackground(c: CanvasRenderingContext2D, S: number, k: number, PX: (v: number) => number, PZ: (v: number) => number) {
     c.fillStyle = '#2f4a38'
     c.fillRect(0, 0, S, S)
     // river
@@ -158,8 +172,9 @@ export class WorldMap {
     // bridge
     c.fillStyle = '#8a8478'
     c.fillRect(PX(-318), PZ(-6), 92 * k, 12 * k)
+  }
 
-    const s = this.state()
+  private labels(c: CanvasRenderingContext2D, s: MapState, px: number, dpr: number, S: number, PX: (v: number) => number, PZ: (v: number) => number) {
     this.hits = []
     const fs = (px < 520 ? 10.5 : 12.5) * dpr
     c.font = `600 ${fs}px system-ui, sans-serif`

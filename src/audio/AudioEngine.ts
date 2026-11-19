@@ -47,6 +47,8 @@ export class AudioEngine {
   private nextAmbient = 0
   private nextHorn = 4
   private cityGain: GainNode | null = null
+  private region: 'city' | 'hills' = 'city'
+  private altitude = 0
   enabled = storage.get('akash:sound') !== 'off'
 
   /** must run inside a user gesture */
@@ -161,6 +163,15 @@ export class AudioEngine {
     this.engineOsc2.type = this.voice.wave
   }
 
+  /** the hills are quiet, windy and cold: no city murmur, a steady wind that grows with height */
+  setRegion(r: 'city' | 'hills') {
+    this.region = r
+  }
+
+  setAltitude(a: number) {
+    this.altitude = a
+  }
+
   setEnabled(on: boolean) {
     this.enabled = on
     storage.set('akash:sound', on ? 'on' : 'off')
@@ -197,10 +208,11 @@ export class AudioEngine {
     this.whineOsc.frequency.setTargetAtTime(1400 + this.rpm * 0.55, t, 0.05)
     this.whineGain.gain.setTargetAtTime(driving ? v.whine * 0.008 * (0.3 + load) * (0.4 + s) : 0, t, 0.1)
     this.growlGain.gain.setTargetAtTime(driving ? v.growl * 0.04 * (0.3 + load) : 0, t, 0.1)
-    this.windGain.gain.setTargetAtTime(s * s * (driving ? 0.09 : 0.05), t, 0.2)
+    const wind = s * s * (driving ? 0.09 : 0.05) + (this.region === 'hills' ? 0.03 + 0.085 * this.altitude : 0)
+    this.windGain.gain.setTargetAtTime(wind, t, 0.4)
     this.windFilter.frequency.setTargetAtTime(400 + s * 900, t, 0.2)
 
-    if (this.cityGain) this.cityGain.gain.setTargetAtTime(0.04 + (1 - night) * 0.03, t, 1)
+    if (this.cityGain) this.cityGain.gain.setTargetAtTime(this.region === 'hills' ? 0 : 0.04 + (1 - night) * 0.03, t, 1)
     if (t > this.nextHorn) {
       this.nextHorn = t + 5 + Math.random() * 12 * (1 + night)
       this.distantHorn()

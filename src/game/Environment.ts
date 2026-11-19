@@ -6,7 +6,7 @@ import { clamp } from '../utils/math'
    around the player, and image-based lighting baked from the same
    sky so every material is lit consistently. */
 
-export type TimeMode = 'day' | 'golden' | 'night'
+export type TimeMode = 'day' | 'dawn' | 'golden' | 'night'
 
 export class Environment {
   readonly sky = new Sky()
@@ -174,6 +174,20 @@ export class Environment {
     this.dome.rotation.y = best
   }
 
+  /** colour of the air at the horizon, for things drawn with their own haze (the far mountains, the clouds) */
+  get haze() {
+    return (this.scene.fog as THREE.FogExp2).color
+  }
+
+  /** first light on the high peaks: 1 at dawn, a little at sunset */
+  get alpenglow() {
+    return this.mode === 'dawn' ? 1 : this.mode === 'golden' ? 0.5 : 0
+  }
+
+  setFogDensity(d: number) {
+    ;(this.scene.fog as THREE.FogExp2).density = d
+  }
+
   /** place the sky for a region: its latitude and how dark it is */
   setSkyConditions(latitude: number, clarity: number) {
     this.latitude = latitude
@@ -187,6 +201,17 @@ export class Environment {
     if (mode === 'day') {
       this.night = 0
       this.setSun(28, 235)
+    } else if (mode === 'dawn') {
+      // first light: the sun just up in the east, pink-gold air, peaks catching it first
+      this.night = 0.2
+      this.setSun(3.2, 80)
+      this.sun.color.set('#ffb27a')
+      this.sun.intensity = 3.4
+      // the low sun grazes flat ground: fill with a warm sky and a cool ground bounce
+      this.hemi.color.set('#ffd2b8')
+      this.hemi.groundColor.set('#6c5b72')
+      this.hemi.intensity = 1.15
+      this.scene.environmentIntensity = 0.7
     } else if (mode === 'golden') {
       this.night = 0.35
       this.setSun(5, 255)
@@ -206,12 +231,13 @@ export class Environment {
       this.scene.environmentIntensity = 0.12
       ;(this.scene.fog as THREE.FogExp2).color.set('#131a2c')
     }
-    if (mode !== 'night') {
+    if (mode !== 'night' && mode !== 'dawn') {
       this.hemi.color.set('#bcd6ff')
       this.hemi.groundColor.set('#5b5040')
       this.hemi.intensity = 0.25
     }
     if (mode === 'golden') (this.scene.fog as THREE.FogExp2).color.set('#d9a77a')
+    if (mode === 'dawn') (this.scene.fog as THREE.FogExp2).color.set('#eab59a')
     this.skyRoot.visible = this.moon.visible = mode === 'night'
     this.domeMat.uniforms.uAmount.value = mode === 'night' ? 1 : 0
     for (const s of [this.sky, this.envSky]) s.material.uniforms.uNight.value = mode === 'night' ? 1 : 0
@@ -270,6 +296,9 @@ export class Environment {
 
   /** keep the shadow frustum centred on the player, snapped to texels to stop shimmering */
   follow(p: THREE.Vector3) {
+    // the sky is a huge box: carry it with the player so it works anywhere in the world
+    this.sky.position.set(p.x, 0, p.z)
+    this.envSky.position.set(p.x, 0, p.z)
     const size = (this.sun.shadow.camera.right - this.sun.shadow.camera.left) / this.sun.shadow.mapSize.x
     const x = Math.round(p.x / size) * size
     const z = Math.round(p.z / size) * size

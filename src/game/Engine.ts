@@ -27,7 +27,7 @@ type Tick = (dt: number, t: number) => void
 export class Engine {
   readonly renderer: THREE.WebGLRenderer
   readonly scene = new THREE.Scene()
-  readonly camera = new THREE.PerspectiveCamera(60, 1, 0.1, 4000)
+  readonly camera = new THREE.PerspectiveCamera(60, 1, 0.1, 6000)
   readonly quality: Quality
   readonly composer: EffectComposer
   private ao: N8AOPostPass | null = null
@@ -70,6 +70,11 @@ export class Engine {
 
     this.resize()
     window.addEventListener('resize', () => this.resize(), { passive: true })
+  }
+
+  /** ambient occlusion is a city luxury: the mountains are too far and too large for it */
+  setAO(on: boolean) {
+    if (this.ao) this.ao.enabled = on
   }
 
   resize() {

@@ -9,6 +9,8 @@ import { AudioEngine } from './audio/AudioEngine'
 import { ICONS, storage } from './utils/dom'
 import { hasWebGL, isTouch } from './utils/device'
 import { PLOTS, GRID, HIGHWAY, DISTRICTS } from './game/city/Plan'
+import { HB, HILLS_Z } from './game/hills/Route'
+import { clamp } from './utils/math'
 import type { Spot } from './game/city/Landmarks'
 
 const $ = (id: string) => document.getElementById(id)!
@@ -99,7 +101,8 @@ export class GameApp {
     }
     this.phone.onWaypoint = (id) => this.setWaypoint(id)
     this.worldMap = new WorldMap(() => ({
-      spots: g.world.landmarks.spots.map((s) => ({ id: s.id, title: s.title, sub: s.sub, x: s.pos.x, z: s.pos.z })),
+      spots: (g.region === 'hills' ? g.hills.spots : g.world.landmarks.spots).map((s) => ({ id: s.id, title: s.title, sub: s.sub, x: s.pos.x, z: s.pos.z })),
+      hills: g.region === 'hills' && g.hills.mapImage() ? { bg: g.hills.mapImage()!, x0: HB.x0, z0: HILLS_Z + HB.z0, w: HB.x1 - HB.x0, h: HB.z1 - HB.z0 } : undefined,
       player: { x: g.player.position.x, z: g.player.position.z, yaw: g.player.yaw },
       vehicles: g.vehicles.map((v) => ({ kind: v.kind, x: v.position.x, z: v.position.z })),
       waypoint: this.waypoint?.id ?? null,
@@ -119,13 +122,32 @@ export class GameApp {
     const tram = g.world.town.tram
     if (tram) tram.onBell = (pos) => this.audio.tramBell(Math.max(0, 1 - pos.distanceTo(g.player.position) / 140))
     const timeBtn = $('btn-time')
-    const modes = ['day', 'golden', 'night'] as const
-    const labels = { day: 'Day', golden: 'Golden hour', night: 'Night' }
+    const modes = ['day', 'dawn', 'golden', 'night'] as const
+    const labels = { day: 'Day', dawn: 'Sunrise', golden: 'Golden hour', night: 'Night' }
     const saved = storage.get('akash:time') as (typeof modes)[number] | null
     // Kolkata looks its best after dark: night is the default until the visitor picks otherwise
     g.env.setTime(saved && modes.includes(saved) ? saved : 'night')
     const sync = () => ($('btn-time-label').textContent = labels[g.env.mode])
     sync()
+    g.onTimeChanged = sync
+    const fader = $('fader')
+    g.onTransition = (phase, to) => {
+      fader.style.background = '#050608'
+      fader.style.transition = 'opacity 0.6s ease'
+      fader.style.opacity = phase === 'out' ? '1' : '0'
+      if (phase === 'in') {
+        this.audio.setRegion(to)
+        this.toasts.show(to === 'hills' ? '⛰️' : '🏙️', to === 'hills' ? 'Welcome to the hills. The road climbs and narrows — it ends at Sandakphu. First light is on.' : 'Back in Kolkata.', 6200)
+      }
+    }
+    g.onHillEvent = (e) => {
+      const msg = {
+        viewpoint: ['🏔️', 'Sandakphu, 3,636 m. East: Kanchenjunga and the Sleeping Buddha range. The trail north leads to base camp.'],
+        basecamp: ['⛺', 'Kanchenjunga base camp. The range rises ahead — the summit flag is a little further north.'],
+        summit: ['🚩', 'The summit flag. The whole Himalaya is in front of you. Try the sun button for Sunrise.'],
+      }[e]
+      this.toasts.show(msg[0], msg[1], 7000)
+    }
     timeBtn.addEventListener('click', () => {
       const next = modes[(modes.indexOf(g.env.mode) + 1) % modes.length]
       g.env.setTime(next)
@@ -182,7 +204,7 @@ export class GameApp {
   }
 
   private setWaypoint(id: string) {
-    const spot = this.game.world.landmarks.spots.find((s) => s.id === id) ?? null
+    const spot = this.game.world.landmarks.spots.find((s) => s.id === id) ?? this.game.hills.spots.find((s) => s.id === id) ?? null
     this.waypoint = spot
     if (!spot) return
     if (!this.beam) {
@@ -249,6 +271,7 @@ export class GameApp {
     speedEl.hidden = !v
     if (v) $('speed-num').textContent = String(Math.round(Math.abs(v.speed) * 3.6))
     if (v?.kind === 'car') this.audio.setVoice((v as import('./game/Vehicles').Car).profile.name)
+    this.audio.setAltitude(g.region === 'hills' ? clamp(focus.y / 700) : 0)
     this.audio.update(v?.kind === 'car' ? v.speed : 0, v?.kind === 'car' ? Math.min(1, Math.abs(g.input.move.y)) : 0, false, v?.kind === 'car', g.env.night)
     // footsteps keep time with the stride
     const gait = p.gait
@@ -328,8 +351,14 @@ export class GameApp {
     const scale = (W / span) * zoom
     c.scale(scale, scale)
     c.translate(-focus.x, -focus.z)
-    c.drawImage(this.mapBg, -span / 2, -span / 2, span, span)
-    for (const s of this.game.world.landmarks.spots) {
+    const inHills = this.game.region === 'hills'
+    const hbg = inHills ? this.game.hills.mapImage() : null
+    if (hbg) {
+      c.fillStyle = '#101820'
+      c.fillRect(HB.x0 - 2000, HILLS_Z + HB.z0 - 2000, 6000, 8000)
+      c.drawImage(hbg, HB.x0, HILLS_Z + HB.z0, HB.x1 - HB.x0, HB.z1 - HB.z0)
+    } else c.drawImage(this.mapBg, -span / 2, -span / 2, span, span)
+    for (const s of inHills ? this.game.hills.spots : this.game.world.landmarks.spots) {
       c.fillStyle = this.waypoint?.id === s.id ? '#ffc61a' : this.visited.has(s.id) ? '#9be3b5' : '#ffffff'
       c.beginPath()
       c.arc(s.pos.x, s.pos.z, 4.5 / zoom * 2, 0, Math.PI * 2)

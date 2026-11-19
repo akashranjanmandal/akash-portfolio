@@ -91,7 +91,7 @@ export const SIGHTS = [
 ]
 
 /** the Eastern Bypass: a divided highway running north-south beyond the east edge of the grid */
-export const HIGHWAY = { x: 450, z0: -205, z1: 415, w: 31 }
+export const HIGHWAY = { x: 450, z0: -500, z1: 415, w: 31 }
 
 /** special blocks that are not lined with shop-houses (block centres on the grid) */
 export type DistrictKind = 'lake' | 'plaza'

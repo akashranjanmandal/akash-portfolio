@@ -1,5 +1,7 @@
 import { Engine } from './Engine'
 import { Environment } from './Environment'
+import { Hills, type HillEvent } from './hills/Hills'
+import { HIGHWAY } from './city/Plan'
 import { Assets } from './Assets'
 import { Physics } from './Physics'
 import { Input } from './Input'
@@ -36,6 +38,17 @@ export class Game {
   /** one pair of headlights, moved onto whichever car is being driven */
   private beams: THREE.SpotLight[] = []
   onPrompt?: (text: string | null) => void
+  /** the hills: built the first time you go through the tunnel */
+  hills!: Hills
+  region: 'city' | 'hills' = 'city'
+  /** the screen fades out while the region changes, then back in */
+  onTransition?: (phase: 'out' | 'in', to: 'city' | 'hills') => void
+  onHillEvent?: (e: HillEvent) => void
+  /** called when the game changes the time of day by itself (arriving in the hills at first light) */
+  onTimeChanged?: () => void
+  private travelling = false
+  private portalCool = 3
+  private hillsSeen = false
   private prompt: string | null = null
 
   constructor(canvas: HTMLCanvasElement, ui: { stick: HTMLElement; knob: HTMLElement }) {
@@ -50,6 +63,9 @@ export class Game {
     await this.assets.load(MODELS, TEXTURES, IMAGES)
     this.world = new World(this.engine.scene, this.engine.renderer, this.physics, this.assets, this.engine.quality)
     this.world.build()
+    this.hills = new Hills(this.engine.scene, this.physics, this.assets, this.engine.quality, this.world.town.mats, this.env.sunDir)
+    this.hills.onEvent = (e) => this.onHillEvent?.(e)
+    this.env.setSkyConditions(22.6, 0.6)
     onProgress(0.92)
     const spawn = this.world.spawn
     this.player = new Player(this.physics, this.assets.models.get('man')!, this.assets.models.get('xbot-anims')!, spawn.pos)
@@ -138,6 +154,57 @@ export class Game {
       s.intensity = driving && this.env.night > 0.3 ? 70 * this.env.night : 0
       if (driving && s.parent !== driving.root) driving.root.add(s, s.target)
     }
-    this.world.update(dt, t, focus)
+    this.checkPortals(focus, dt)
+    if (this.region === 'city') this.world.update(dt, t, focus)
+    else this.hills.update(dt, t, this.engine.camera.position, focus, this.env.haze, this.env.alpenglow, this.env.night)
+  }
+
+  /* ── the tunnel between the city and the hills ───────────── */
+
+  private checkPortals(focus: THREE.Vector3, dt: number) {
+    this.portalCool -= dt
+    if (this.travelling || this.portalCool > 0) return
+    if (this.region === 'city') {
+      if (Math.abs(focus.x - HIGHWAY.x) < 16 && focus.z < HIGHWAY.z0 - 72) void this.travel('hills')
+    } else {
+      const r = this.hills.returnTrigger
+      if (Math.abs(focus.x - r.x) < r.half && focus.z > r.z) void this.travel('city')
+    }
+  }
+
+  /** fade out, move everything the player is using to the other region, fade back in */
+  async travel(to: 'city' | 'hills') {
+    if (this.travelling || to === this.region) return
+    this.travelling = true
+    this.onTransition?.('out', to)
+    await new Promise((r) => setTimeout(r, 650))
+    // the hills are built the first time (a short pause behind the black screen)
+    if (to === 'hills' && !this.hills.built) await new Promise<void>((r) => setTimeout(() => (this.hills.build(), r()), 30))
+    const dest = to === 'hills' ? new THREE.Vector3(this.hills.arrive.x, this.hills.arrive.y, this.hills.arrive.z) : new THREE.Vector3(HIGHWAY.x + 6, 0.3, HIGHWAY.z0 - 60)
+    const yaw = to === 'hills' ? this.hills.arrive.yaw : Math.PI
+    const p = this.player
+    const v = p.vehicle
+    if (v) (v as Car | Bike).teleport(dest, yaw)
+    p.teleport(dest, yaw)
+    this.region = to
+    this.world.group.visible = to === 'city'
+    this.hills.setVisible(to === 'hills')
+    this.engine.setAO(to === 'city')
+    if (to === 'hills') {
+      this.env.setSkyConditions(27.1, 1)
+      this.env.setFogDensity(0.0011)
+      if (!this.hillsSeen) {
+        // the first arrival is at first light, the way you would want to see it
+        this.hillsSeen = true
+        this.env.setTime('dawn')
+        this.onTimeChanged?.()
+      }
+    } else {
+      this.env.setSkyConditions(22.6, 0.6)
+      this.env.setFogDensity(0.0009)
+    }
+    this.portalCool = 4
+    this.onTransition?.('in', to)
+    this.travelling = false
   }
 }

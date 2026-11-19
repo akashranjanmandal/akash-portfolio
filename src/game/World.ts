@@ -8,6 +8,7 @@ import { Town } from './city/Town'
 import { Howrah, riverDepth, STATION } from './city/Howrah'
 import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
+import { buildPortal } from './hills/Portal'
 import { Landmarks } from './city/Landmarks'
 import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt } from './city/Plan'
 
@@ -37,7 +38,7 @@ function landDist(x: number, z: number) {
 function groundAt(x: number, z: number) {
   const g = baseGround(x, z)
   // the bypass is built on a flat strip that blends back into the land
-  const hz = z > HIGHWAY.z0 - 40 && z < HIGHWAY.z1 + 40 ? Math.abs(x - HIGHWAY.x) : 999
+  const hz = z > HIGHWAY.z0 - 120 && z < HIGHWAY.z1 + 40 ? Math.abs(x - HIGHWAY.x) : 999
   if (hz < 40) {
     const t = Math.min(1, Math.max(0, (hz - 24) / 14))
     return -0.08 * (1 - t) + g * t
@@ -123,6 +124,7 @@ export class World {
     this.town = new Town(this.physics, this.assets)
     this.town.build()
     this.group.add(this.town.group)
+    buildPortal(this.group, this.physics, this.town.mats, { x: HIGHWAY.x, z: HIGHWAY.z0, dir: -1, roadY: 0, width: 28, length: 80, title: 'NH-12 · TO THE HILLS', sub: 'Darjeeling · Singalila · Sandakphu', rock: this.assets.material('rocky_terrain_02', 1) })
     // lamp heads glow after dark; a small pool of real lights follows the player
     const heads = this.town.lampPositions.flatMap((p) => [p.x, 5.95, p.z])
     const hg = new THREE.BufferGeometry()
@@ -159,6 +161,8 @@ export class World {
         const [ax, az] = pts[i]
         const [bx, bz] = pts[(i + 1) % pts.length]
         const mx = (ax + bx) / 2, mz = (az + bz) / 2
+        // leave the tunnel to the hills open
+        if (az === z0 && bz === z0 && mx > HIGHWAY.x - 60 && mx < HIGHWAY.x + 60) continue
         this.physics.fixedBox(mx, heightAt(mx, mz) + 5, mz, 0.5, 14, Math.hypot(bx - ax, bz - az) / 2 + 1, Math.atan2(bx - ax, bz - az))
       }
     }
@@ -294,7 +298,7 @@ export class World {
       if (x < -200 && Math.abs(z) < 12) return false
       if (Math.abs(x - STATION.x) < 26 && Math.abs(z - STATION.z) < 56) return false
       if (districtAt(x, z)) return false
-      if (Math.abs(x - HIGHWAY.x) < 40 && z > HIGHWAY.z0 - 30 && z < HIGHWAY.z1 + 30) return false
+      if (Math.abs(x - HIGHWAY.x) < 90 && z > HIGHWAY.z0 - 120 && z < HIGHWAY.z1 + 30) return false
       const town = inTown(x, z, 5)
       if (town && !inBlockMiddle(x, z)) return false
       return !plots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)
