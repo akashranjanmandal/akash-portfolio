@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { Physics } from '../Physics'
 import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
+import { SCALE } from '../Scale'
 import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame } from './Plan'
 import { rng } from '../../utils/math'
 import { addFairy, FairyLights, type FairyBuffer } from './Fairy'
@@ -11,7 +12,7 @@ import { kerbStripes, wires, tramLine, Tram, streetLife, victoriaMemorial } from
    that make the town feel lived in. Landmarks are built separately. */
 
 const CURB = 0.15
-const FLOOR = 3.2
+const FLOOR = SCALE.floor
 
 export type Materials = ReturnType<typeof townMaterials>
 

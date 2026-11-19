@@ -9,7 +9,7 @@ import { Howrah, riverDepth, STATION } from './city/Howrah'
 import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
 import { Landmarks } from './city/Landmarks'
-import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown } from './city/Plan'
+import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -294,8 +294,9 @@ export class World {
     // shade trees along the pavements, between the lamps — Kolkata's avenues are green tunnels
     const avenue: THREE.Matrix4[] = []
     const kerb = 50 - 5 - 1.0
-    for (const cx of [-150, -50, 50, 150]) {
-      for (const cz of [-150, -50, 50, 150]) {
+    const centres = GRID.slice(0, -1).map((g, i) => (g + GRID[i + 1]) / 2)
+    for (const cx of centres) {
+      for (const cz of centres) {
         for (const t of [-23, 23]) {
           for (const [px, pz] of [[cx + t, cz + kerb], [cx + t, cz - kerb], [cx + kerb, cz + t], [cx - kerb, cz + t]]) {
             if (r() < 0.45) continue

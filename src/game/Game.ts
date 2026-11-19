@@ -45,7 +45,7 @@ export class Game {
 
   async load(onProgress: (p: number) => void) {
     await this.physics.init()
-    this.env = new Environment(this.engine.renderer, this.engine.scene, this.engine.quality.shadowSize, this.engine.quality.shadows)
+    this.env = new Environment(this.engine.renderer, this.engine.scene, this.engine.quality.shadowSize, this.engine.quality.shadows, `${import.meta.env.DEV ? '/assets/' : 'assets/'}sky/stars-${this.engine.quality.tier === 'low' ? '2k' : '4k'}.webp`)
     this.assets = new Assets((p) => onProgress(p * 0.85), this.engine.renderer, this.engine.renderer.capabilities.getMaxAnisotropy())
     await this.assets.load(MODELS, TEXTURES, IMAGES)
     this.world = new World(this.engine.scene, this.engine.renderer, this.physics, this.assets, this.engine.quality)
@@ -130,6 +130,7 @@ export class Game {
     else p.placeCamera(this.engine.camera, dt)
     const focus = p.vehicle ? p.vehicle.position : p.position
     this.env.follow(focus)
+    this.env.update(dt)
     this.world.night = this.env.night
     for (const v of this.vehicles) if (v.kind === 'car') (v as Car).setLights(this.env.night)
     const driving = p.vehicle?.kind === 'car' ? p.vehicle : null

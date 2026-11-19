@@ -4,6 +4,7 @@ import type { Physics } from '../Physics'
 import { Batch, M } from './Batch'
 import { townBuilding, type Materials } from './Town'
 import { PLOTS, plotFrame, type Plot } from './Plan'
+import { SCALE } from '../Scale'
 import { rng } from '../../utils/math'
 import { mergeByMaterial } from '../merge'
 import { addFairy, type FairyBuffer } from './Fairy'
@@ -138,6 +139,19 @@ function marker(group: THREE.Group, pos: THREE.Vector3, color: string) {
 }
 
 
+/** a proper door on a facade: dark frame, glazed leaf, stone step, small canopy and a lamp (2.2 m x 1.1 m opening) */
+function doorway(ctx: Ctx, lx: number, lz: number, canopy = true) {
+  const { b, m } = ctx
+  const w = SCALE.doorW
+  const h = SCALE.doorH
+  b.box(w + 0.3, h + 0.2, 0.14, m.frame, ctx.at(lx, h / 2 + 0.1, lz + 0.05))
+  b.add(new THREE.PlaneGeometry(w, h), m.glassLit, ctx.at(lx, h / 2, lz + 0.13))
+  b.box(0.05, h, 0.06, m.frame, ctx.at(lx, h / 2, lz + 0.16))
+  b.box(w + 0.9, 0.12, 0.9, m.granite, ctx.at(lx, 0.06, lz + 0.5), 2)
+  if (canopy) b.box(w + 1.2, 0.1, 1.1, m.trim, ctx.at(lx, h + 0.45, lz + 0.6))
+  b.add(new THREE.SphereGeometry(0.1, 10, 8), ctx.lampMat, ctx.at(lx + w / 2 + 0.45, h - 0.1, lz + 0.18))
+}
+
 /* ── models placed on plots ─────────────────────────────────── */
 
 type PlaceOpts = {
@@ -254,7 +268,7 @@ function gobtHq(c: Ctx) {
   const z0 = -4 // front wall
   const z1 = z0 - D // back wall
   const zc = (z0 + z1) / 2
-  const F = 4.6 // floor-to-floor
+  const F = 4.2 // floor-to-floor (a tall, glazed ground floor)
   const H = F * 2
   const door = 4.4
   const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.9, roughness: 0.3, emissive: '#e8a313', emissiveIntensity: 0.15 })
@@ -296,8 +310,8 @@ function gobtHq(c: Ctx) {
   // (the slab above starts 8 m behind the front line; the void is simply the part with no slab)
 
   // staircase along the left wall up to the mezzanine
-  const steps = 16
-  const rise = F / steps
+  const steps = 21
+  const rise = F / steps // 0.2 m: a comfortable stair
   for (let i = 0; i < steps; i++) {
     const sz = z0 - 4 - i * 0.42
     solid(c, -W / 2 + 3.2, (i + 1) * rise / 2, sz, 2.4, (i + 1) * rise, 0.42, wood, 1)
@@ -475,6 +489,7 @@ const SPECS: Record<string, Spec> = {
       b.box(30, 0.25, 2.4, m.trim, c.at(0, 3.3, -0.9))
       b.add(new THREE.CylinderGeometry(0.06, 0.08, 9, 8), m.rail, c.at(-17, 4.5, 3))
       collider(c, 0, -8, 30, 12, 7)
+      doorway(c, 0, -1.95)
       sign(c, 14, 0, 8.4, -1.9)
     },
   },
@@ -503,43 +518,77 @@ const SPECS: Record<string, Spec> = {
   xeta: {
     title: 'Xeta Labs', sub: 'Assam · Intern 2024 → Full-stack 2025', accent: '#0d1620', ink: '#3fe0b8',
     build(c) {
-      // the loft office, scaled up to a real office floor, its glass front turned to the street
-      const S = 1.55
-      const placed = placeModel(c, 'office', -3.5, -13.5, -Math.PI / 2, { passable: /glass|window|door/i, scale: S })
-      const { b } = c
+      // two office modules at their real size (about 3 m storeys) joined by a glazed lobby
+      const S = 1.12
+      const A = placeModel(c, 'office', -10.5, -13.5, -Math.PI / 2, { passable: /glass|window|door/i, scale: S })
+      const B = placeModel(c, 'office', 10.5, -13.5, -Math.PI / 2, { passable: /glass|window|door/i, scale: S })
+      const { b, m } = c
       const neon = new THREE.MeshStandardMaterial({ color: '#3fe0b8', emissive: '#3fe0b8', emissiveIntensity: 1.4 })
-      if (placed) {
-        // a rooftop sign on two posts, teal neon under it and along the pavement
-        for (const x of [-4.2, 4.2]) b.box(0.25, 1.6, 0.25, c.m.frame, c.at(x, 10.3, -4))
-        b.box(11.4, 0.1, 0.1, neon, c.at(0, 9.7, -2.6))
-        nightLight(c, 0, 4.5, -10, '#d8fff4', 36, 22)
-        nightLight(c, 0, 4.5, -18, '#d8fff4', 30, 20)
-        nightLight(c, 0, 1.5, 2.5, '#3fe0b8', 22, 16)
+      const glass = new THREE.MeshStandardMaterial({ color: '#a9c4d6', metalness: 0.6, roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false })
+      const floorMat = new THREE.MeshStandardMaterial({ color: '#8d8a82', roughness: 0.32 })
+      const wood = m.wood
+      if (A && B) {
+        // the lobby between the modules: 8 m wide, 12 m deep, double-height glass front with a door
+        const z0 = -4.9
+        const z1 = -17
+        const H = 4.6
+        b.box(8, 0.06, z0 - z1, floorMat, c.at(0, 0.03, (z0 + z1) / 2), 3)
+        solid(c, 0, H + 0.1, (z0 + z1) / 2, 8.4, 0.3, z0 - z1 + 0.4, m.trim)
+        solid(c, 0, H / 2, z1, 8, H, 0.3, m.plaster[1])
+        const door = SCALE.doorW + 1.3
+        for (const sx of [-1, 1]) {
+          const cx = sx * (door / 2 + (8 - door) / 4)
+          b.add(new THREE.PlaneGeometry((8 - door) / 2, H), glass, c.at(cx, H / 2, z0))
+          const p = new THREE.Vector3().setFromMatrixPosition(c.at(cx, H / 2, z0))
+          c.physics.fixedBox(p.x, H / 2, p.z, (8 - door) / 4, H / 2, 0.1, plotFrame(c.plot).yaw)
+        }
+        b.box(door + 0.2, 0.22, 0.2, m.frame, c.at(0, SCALE.doorH + 0.5, z0))
+        for (const sx of [-1, 1]) b.box(0.12, H, 0.2, m.frame, c.at(sx * (door / 2), H / 2, z0))
+        // reception desk, sofas, plants
+        solid(c, 0, 0.55, z1 + 3, 3.2, 1.1, 0.8, wood, 1)
+        for (const sx of [-1, 1]) solid(c, sx * 2.6, 0.4, z0 - 3.5, 1.8, 0.8, 0.8, new THREE.MeshStandardMaterial({ color: '#1f4a47', roughness: 0.9 }), 1)
+        const plant = c.models.get('potted_plant_01')
+        if (plant) for (const x of [-3.4, 3.4]) {
+          const g = plant.scene.clone(true)
+          g.applyMatrix4(c.at(x, 0.06, z0 - 1.2))
+          c.group.add(g)
+        }
+        // teal neon: roofline of the lobby and a band across both modules
+        b.box(8.4, 0.12, 0.12, neon, c.at(0, H + 0.4, z0 + 0.1))
+        for (const x of [-10.5, 10.5]) b.box(12, 0.1, 0.1, neon, c.at(x, 7.25, -4.6))
+        b.box(7.6, 0.05, 0.4, c.lampMat, c.at(0, H - 0.2, (z0 + z1) / 2))
+        nightLight(c, 0, 3.4, -9, '#d8fff4', 30, 18)
+        nightLight(c, -10.5, 3.6, -10, '#d8fff4', 30, 20)
+        nightLight(c, 10.5, 3.6, -10, '#d8fff4', 30, 20)
+        nightLight(c, 0, 1.5, 2.5, '#3fe0b8', 20, 14)
+        // a sign above the lobby on two posts
+        for (const x of [-2.6, 2.6]) b.box(0.2, 1.4, 0.2, m.frame, c.at(x, H + 1.1, -5.4))
       }
-      sign(c, 11, 0, 11.6, -4)
-      screen(c, 8, -10, 3.4, -3)
+      sign(c, 9, 0, 6.4, -5.2)
     },
   },
   picaku: {
     title: 'Picaku', sub: 'Record · Transcribe · Never forget', accent: '#e2312b', screen: 'img/tex/picaku.webp',
     build(c) {
       const { b, m } = c
-      b.box(12, 4.5, 9, m.glass, c.at(0, 2.25, -5), 3)
-      b.box(12.6, 0.4, 9.6, m.trim, c.at(0, 4.7, -5))
-      collider(c, 0, -5, 12, 9, 4.5)
-      screen(c, 7, 0, 7.4, -0.3)
-      sign(c, 6, 0, 3.2, -0.4)
+      b.box(12, 3.6, 9, m.glass, c.at(0, 1.8, -5), 3)
+      b.box(12.6, 0.4, 9.6, m.trim, c.at(0, 3.8, -5))
+      collider(c, 0, -5, 12, 9, 3.6)
+      doorway(c, 4, -0.5)
+      screen(c, 7, 0, 6.6, -0.3)
+      sign(c, 6, -2, 2.9, -0.4)
     },
   },
   lifeapp: {
     title: 'Life App', sub: 'Play · Learn · Earn · 140K+ users', accent: '#1b8fe6', screen: 'img/tex/lifeapp.webp',
     build(c) {
       const { b, m } = c
-      b.box(12, 4.5, 9, m.glass, c.at(0, 2.25, -5), 3)
-      b.box(12.6, 0.4, 9.6, m.trim, c.at(0, 4.7, -5))
-      collider(c, 0, -5, 12, 9, 4.5)
-      screen(c, 7, 0, 7.4, -0.3)
-      sign(c, 6, 0, 3.2, -0.4)
+      b.box(12, 3.6, 9, m.glass, c.at(0, 1.8, -5), 3)
+      b.box(12.6, 0.4, 9.6, m.trim, c.at(0, 3.8, -5))
+      collider(c, 0, -5, 12, 9, 3.6)
+      doorway(c, 4, -0.5)
+      screen(c, 7, 0, 6.6, -0.3)
+      sign(c, 6, -2, 2.9, -0.4)
     },
   },
   pizzahap: {
@@ -551,7 +600,8 @@ const SPECS: Record<string, Spec> = {
       b.add(new THREE.PlaneGeometry(14, 2.6), m.glassLit, c.at(0, 1.6, 0.03))
       b.box(18, 0.2, 2, m.frame, c.at(0, 3.2, 1))
       collider(c, 0, -7, 18, 14, 7)
-      sign(c, 12, 0, 4.4, 0.05)
+      doorway(c, 7.2, 0.02)
+      sign(c, 12, -1, 4.4, 0.05)
       screen(c, 9, 0, 9.8, -0.2)
     },
   },
@@ -586,7 +636,8 @@ const SPECS: Record<string, Spec> = {
       b.add(new THREE.PlaneGeometry(10, 3), m.glassLit, c.at(0, 1.8, 0.03))
       b.box(16.4, 0.5, 12.4, new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 1, roughness: 0.25 }), c.at(0, 8.2, -6))
       collider(c, 0, -6, 16, 12, 8)
-      sign(c, 10, 0, 4.6, 0.04)
+      doorway(c, 5.4, 0.02)
+      sign(c, 10, -1, 4.6, 0.04)
       screen(c, 8, 0, 10.8, -0.2)
     },
   },
@@ -620,7 +671,8 @@ const SPECS: Record<string, Spec> = {
       b.box(18, 7, 13, m.granite, c.at(0, 3.5, -6.5), 3)
       b.add(new THREE.PlaneGeometry(14, 2.8), m.glassLit, c.at(0, 1.7, 0.03))
       collider(c, 0, -6.5, 18, 13, 7)
-      sign(c, 11, 0, 4.6, 0.04)
+      doorway(c, 6.6, 0.02)
+      sign(c, 11, -1, 4.6, 0.04)
       screen(c, 10, 0, 10, -0.2)
     },
   },
@@ -641,7 +693,9 @@ const SPECS: Record<string, Spec> = {
     build(c) {
       const { b, m } = c
       b.box(16, 10, 13, m.trim, c.at(0, 5, -6.5), 3)
-      b.add(new THREE.PlaneGeometry(12, 6), m.glass, c.at(0, 5, 0.03))
+      b.add(new THREE.PlaneGeometry(12, 2.6), m.glass, c.at(0, 1.5, 0.03))
+      for (const y of [4.9, 8.1]) for (let i = -2; i <= 2; i++) b.add(new THREE.PlaneGeometry(1.6, 1.6), m.glass, c.at(i * 2.6, y, 0.03))
+      doorway(c, -5.2, 0.02)
       collider(c, 0, -6.5, 16, 13, 10)
       sign(c, 9, 0, 1.6, 0.05)
       screen(c, 9, 0, 12.6, -0.2)
