@@ -7,7 +7,32 @@ import { storage } from '../utils/dom'
    thuds, pickups, and birds by day / crickets by night.
 ────────────────────────────────────────────────────────────── */
 
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x))
+
+/** how each car sounds: cylinders set the firing rate, the rest shapes the timbre */
+type Voice = { cyl: number; idle: number; red: number; gears: number; wave: OscillatorType; detune: number; cutoff: number; vol: number; whine: number; growl: number }
+
+const VOICES: Record<string, Voice> = {
+  // old diesel: slow, lumpy, low
+  'Ambassador taxi': { cyl: 4, idle: 650, red: 3600, gears: 4, wave: 'sawtooth', detune: 0, cutoff: 700, vol: 1, whine: 0, growl: 0.5 },
+  // quad-turbo W16: deep, smooth, big turbo whistle
+  'Bugatti Bolide': { cyl: 16, idle: 900, red: 7200, gears: 7, wave: 'sawtooth', detune: 6, cutoff: 1500, vol: 1.1, whine: 0.9, growl: 0.35 },
+  // twin-turbo V8: angry, flat-plane edge
+  'Koenigsegg Jesko Attack': { cyl: 8, idle: 1000, red: 8500, gears: 9, wave: 'sawtooth', detune: 9, cutoff: 2300, vol: 1.15, whine: 0.5, growl: 0.8 },
+  // naturally aspirated V12: high, shrieking, smooth
+  'Lamborghini Centenario': { cyl: 12, idle: 900, red: 8400, gears: 7, wave: 'sawtooth', detune: 4, cutoff: 3200, vol: 1.1, whine: 0, growl: 0.3 },
+  // straight six: silky, mid-range rasp
+  'BMW 3.0 CSL Hommage R': { cyl: 6, idle: 800, red: 7000, gears: 6, wave: 'sawtooth', detune: 3, cutoff: 2000, vol: 1, whine: 0, growl: 0.4 },
+}
+
 export class AudioEngine {
+  private voice: Voice = VOICES['Ambassador taxi']
+  private voiceName = 'Ambassador taxi'
+  private rpm = 800
+  private engineOsc2!: OscillatorNode
+  private whineOsc!: OscillatorNode
+  private whineGain!: GainNode
+  private growlGain!: GainNode
   private ctx: AudioContext | null = null
   private master!: GainNode
   private engineGain!: GainNode
@@ -71,7 +96,32 @@ export class AudioEngine {
     this.engineOsc.connect(this.engineFilter)
     this.engineSub.connect(subGain).connect(this.engineFilter)
     this.engineFilter.connect(chugGain).connect(this.engineGain).connect(this.master)
+    // a detuned twin for width, a sine "turbo whistle", and a rough noise layer for growl
+    this.engineOsc2 = ctx.createOscillator()
+    this.engineOsc2.type = 'sawtooth'
+    this.engineOsc2.frequency.value = 42
+    const twin = ctx.createGain()
+    twin.gain.value = 0.6
+    this.engineOsc2.connect(twin).connect(this.engineFilter)
+    this.whineOsc = ctx.createOscillator()
+    this.whineOsc.type = 'sine'
+    this.whineGain = ctx.createGain()
+    this.whineGain.gain.value = 0
+    this.whineOsc.connect(this.whineGain).connect(this.master)
+    const rough = ctx.createBufferSource()
+    rough.buffer = this.noise
+    rough.loop = true
+    const roughF = ctx.createBiquadFilter()
+    roughF.type = 'bandpass'
+    roughF.frequency.value = 260
+    roughF.Q.value = 0.8
+    this.growlGain = ctx.createGain()
+    this.growlGain.gain.value = 0
+    rough.connect(roughF).connect(this.growlGain).connect(this.master)
+    rough.start()
     this.engineOsc.start()
+    this.engineOsc2.start()
+    this.whineOsc.start()
     this.engineSub.start()
     this.chug.start()
 
@@ -102,6 +152,15 @@ export class AudioEngine {
     city.start()
   }
 
+  /** pick the engine voice for the car being driven */
+  setVoice(name: string) {
+    if (name === this.voiceName) return
+    this.voiceName = name
+    this.voice = VOICES[name] ?? VOICES['Ambassador taxi']
+    this.engineOsc.type = this.voice.wave
+    this.engineOsc2.type = this.voice.wave
+  }
+
   setEnabled(on: boolean) {
     this.enabled = on
     storage.set('akash:sound', on ? 'on' : 'off')
@@ -115,15 +174,29 @@ export class AudioEngine {
     const ctx = this.ctx
     if (!ctx || !this.enabled) return
     const t = ctx.currentTime
-    const s = Math.min(1, Math.abs(speed) / 22)
-    const f = 40 + s * 70 + load * 18 + (boosting ? 18 : 0)
-    this.engineOsc.frequency.setTargetAtTime(f, t, 0.08)
-    this.engineSub.frequency.setTargetAtTime(f / 2, t, 0.08)
-    this.chug.frequency.setTargetAtTime(7 + s * 26, t, 0.1)
-    this.chugDepth.gain.setTargetAtTime(0.32 - s * 0.2, t, 0.2)
-    this.engineFilter.frequency.setTargetAtTime(320 + load * 900 + s * 700, t, 0.1)
-    const vol = (driving ? 0.05 : 0.028) + load * 0.05 + s * 0.04
-    this.engineGain.gain.setTargetAtTime(vol, t, 0.12)
+    const v = this.voice
+    const top = this.voiceName === 'Ambassador taxi' ? 28 : 60
+    const s = Math.min(1, Math.abs(speed) / top)
+    // a gearbox: rpm climbs through each gear then drops on the shift
+    const g = Math.min(v.gears - 1, Math.floor(s * v.gears))
+    const within = s * v.gears - g
+    const target = driving
+      ? v.idle + (v.red - v.idle) * clamp01(0.18 + within * 0.8 + load * 0.15 + (boosting ? 0.05 : 0))
+      : v.idle * 0.85
+    this.rpm += (target - this.rpm) * Math.min(1, 0.18 + (driving ? 0.1 : 0))
+    // four-stroke: one firing per cylinder every two revolutions
+    const fire = (this.rpm / 60) * (v.cyl / 2)
+    this.engineOsc.frequency.setTargetAtTime(fire, t, 0.03)
+    this.engineOsc2.frequency.setTargetAtTime(fire * (1 + v.detune / 1000), t, 0.03)
+    this.engineSub.frequency.setTargetAtTime(fire / 2, t, 0.03)
+    this.chug.frequency.setTargetAtTime(Math.min(40, fire / 4), t, 0.05)
+    this.chugDepth.gain.setTargetAtTime(this.voiceName === 'Ambassador taxi' ? 0.3 : 0.08, t, 0.2)
+    this.engineFilter.frequency.setTargetAtTime(v.cutoff * (0.45 + 0.55 * clamp01((this.rpm - v.idle) / (v.red - v.idle)) + load * 0.4), t, 0.05)
+    const vol = ((driving ? 0.05 : 0.026) + load * 0.05 + s * 0.035) * v.vol
+    this.engineGain.gain.setTargetAtTime(vol, t, 0.08)
+    this.whineOsc.frequency.setTargetAtTime(1400 + this.rpm * 0.55, t, 0.05)
+    this.whineGain.gain.setTargetAtTime(driving ? v.whine * 0.008 * (0.3 + load) * (0.4 + s) : 0, t, 0.1)
+    this.growlGain.gain.setTargetAtTime(driving ? v.growl * 0.04 * (0.3 + load) : 0, t, 0.1)
     this.windGain.gain.setTargetAtTime(s * s * (driving ? 0.09 : 0.05), t, 0.2)
     this.windFilter.frequency.setTargetAtTime(400 + s * 900, t, 0.2)
 

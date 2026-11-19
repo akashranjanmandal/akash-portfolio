@@ -488,8 +488,9 @@ export class Town {
     c.width = c.height = 128
     const g = c.getContext('2d')!
     const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
-    grd.addColorStop(0, 'rgba(255,200,120,0.85)')
-    grd.addColorStop(0.45, 'rgba(255,180,100,0.35)')
+    grd.addColorStop(0, 'rgba(255,196,120,0.6)')
+    grd.addColorStop(0.3, 'rgba(255,180,100,0.28)')
+    grd.addColorStop(0.7, 'rgba(255,170,90,0.06)')
     grd.addColorStop(1, 'rgba(255,170,90,0)')
     g.fillStyle = grd
     g.fillRect(0, 0, 128, 128)
@@ -508,10 +509,10 @@ export class Town {
     const wet = n > 0.3 ? n : 0
     this.mats.asphalt.roughness = 1 - wet * 0.55
     this.mats.asphalt.metalness = wet * 0.15
-    if (this.lampGlass) this.lampGlass.emissiveIntensity = n > 0.3 ? 9 * n : 0
+    if (this.lampGlass) this.lampGlass.emissiveIntensity = n > 0.3 ? 3.2 * n : 0
     if (this.pools) {
       this.pools.visible = n > 0.3
-      ;(this.pools.material as THREE.MeshBasicMaterial).opacity = n * 0.55
+      ;(this.pools.material as THREE.MeshBasicMaterial).opacity = n * 0.7
     }
     this.mats.glassLit.emissiveIntensity = n * 0.38
     this.mats.shopGlass.emissiveIntensity = 0.12 + n * 0.75

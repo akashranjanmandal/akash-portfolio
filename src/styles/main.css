@@ -913,3 +913,23 @@ body.phone-open .minimap, body.phone-open .help { opacity: 0; transition: opacit
 
 .quality select { margin-left: 6px; padding: 6px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.08); color: #fff; font: 600 13px var(--f-display); }
 .quality select option { color: #141218; }
+
+/* full-screen map */
+.wmap { position: fixed; inset: 0; z-index: var(--z-overlay); background: #12110f; color: #fff; }
+.wmap[hidden] { display: none; }
+.wmap__inner { display: grid; grid-template-columns: 1fr 340px; height: 100%; padding: calc(var(--safe-t) + 70px) 20px 20px; gap: 20px; }
+.wmap__stage { display: grid; place-items: center; min-height: 0; min-width: 0; }
+.wmap__stage canvas { border-radius: 16px; box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.8); cursor: pointer; max-width: 100%; max-height: 100%; }
+.wmap__side { overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.3) transparent; overscroll-behavior: contain; }
+.wmap__side h2 { margin: 0 0 12px; font-size: 20px; }
+.wmap__side h2 small { display: block; font: 500 12px var(--f-mono); color: rgba(255,255,255,0.55); margin-top: 4px; }
+.wmap__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.wmap__list button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: grid; grid-template-columns: 1fr auto; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.06); }
+.wmap__list button:hover, .wmap__list button:focus-visible { background: rgba(255,198,26,0.22); }
+.wmap__list b { font-size: 14px; }
+.wmap__list small { grid-column: 1; font-size: 12px; color: rgba(255,255,255,0.55); }
+.wmap__list span { grid-row: 1 / span 2; grid-column: 2; align-self: center; font: 600 12px var(--f-mono); color: var(--yellow); }
+@media (max-width: 820px) {
+  .wmap__inner { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 36%; padding: calc(var(--safe-t) + 64px) 12px 12px; }
+}
+body.map-open .toasts, body.map-open .hud { display: none; }

@@ -147,6 +147,8 @@ type PlaceOpts = {
   passable?: RegExp
   /** world height the model's lowest walkable floor should sit at */
   floor?: number
+  /** uniform scale (physics follows) */
+  scale?: number
 }
 
 /**
@@ -168,6 +170,10 @@ function placeModel(ctx: Ctx, name: string, lx: number, lz: number, yaw: number,
   const box = new THREE.Box3().setFromObject(root)
   // floor: the model's own y = 0 is its ground floor in these scenes
   root.position.y = opts.floor ?? 0.16
+  if (opts.scale) {
+    holder.scale.setScalar(opts.scale)
+    holder.updateMatrix()
+  }
   holder.applyMatrix4(ctx.at(lx, -0.15, lz, yaw))
   ctx.group.add(holder)
   holder.updateMatrixWorld(true)
@@ -227,6 +233,145 @@ function fairy(ctx: Ctx, ax: number, ay: number, az: number, bx: number, by: num
   const a = new THREE.Vector3().setFromMatrixPosition(ctx.at(ax, ay, az))
   const b = new THREE.Vector3().setFromMatrixPosition(ctx.at(bx, by, bz))
   addFairy(ctx.fairy, a, b, sag, colour)
+}
+
+
+/** a solid box that also blocks the player: plot-local centre and size */
+function solid(ctx: Ctx, lx: number, ly: number, lz: number, w: number, h: number, d: number, mat: THREE.Material, tex = 3) {
+  ctx.b.box(w, h, d, mat, ctx.at(lx, ly, lz), tex)
+  const p = new THREE.Vector3().setFromMatrixPosition(ctx.at(lx, ly, lz))
+  ctx.physics.fixedBox(p.x, p.y, p.z, w / 2, h / 2, d / 2, plotFrame(ctx.plot).yaw)
+}
+
+/**
+ * GOBT head office: a two-storey glass-fronted building you can walk into. Reception under a
+ * glowing logo wall, rows of desks, glass meeting rooms, and a staircase up to a mezzanine.
+ */
+function gobtHq(c: Ctx) {
+  const { b, m } = c
+  const W = 40
+  const D = 24
+  const z0 = -4 // front wall
+  const z1 = z0 - D // back wall
+  const zc = (z0 + z1) / 2
+  const F = 4.6 // floor-to-floor
+  const H = F * 2
+  const door = 4.4
+  const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.9, roughness: 0.3, emissive: '#e8a313', emissiveIntensity: 0.15 })
+  const floorMat = new THREE.MeshStandardMaterial({ color: '#8d8a82', roughness: 0.32, metalness: 0.05 })
+  const wallMat = new THREE.MeshStandardMaterial({ color: '#ece8df', roughness: 0.9 })
+  const dark = new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.55, metalness: 0.3 })
+  const wood = m.wood
+  const screenMat = new THREE.MeshStandardMaterial({ color: '#10131a', emissive: '#6fa8ff', emissiveIntensity: 0.55, roughness: 0.3 })
+  const sofa = new THREE.MeshStandardMaterial({ color: '#1f3a5f', roughness: 0.9 })
+  const glass = new THREE.MeshStandardMaterial({ color: '#a9c4d6', metalness: 0.6, roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false })
+
+  // plinth, floors, roof
+  solid(c, 0, 0.12, zc, W + 4, 0.24, D + 4, m.granite, 3)
+  b.box(W, 0.06, D, floorMat, c.at(0, 0.27, zc), 3)
+  // walls: back, sides with a ribbon of windows, front glass either side of the door
+  solid(c, 0, H / 2, z1, W, H, 0.4, wallMat)
+  for (const sx of [-1, 1]) {
+    solid(c, sx * W / 2, H / 2, zc, 0.4, H, D, wallMat)
+    for (const fl of [0, 1]) b.add(new THREE.PlaneGeometry(D - 4, 2.2), glass, c.at(sx * (W / 2 - 0.22), fl * F + 2.6, zc, -sx * Math.PI / 2))
+  }
+  const fw = (W - door) / 2
+  for (const sx of [-1, 1]) {
+    const cx = sx * (door / 2 + fw / 2)
+    b.add(new THREE.PlaneGeometry(fw, H - 0.6), glass, c.at(cx, H / 2 + 0.1, z0))
+    for (let x = -fw / 2; x <= fw / 2 + 0.01; x += fw / 5) b.box(0.12, H, 0.2, dark, c.at(cx + x, H / 2, z0))
+    const p = new THREE.Vector3().setFromMatrixPosition(c.at(cx, H / 2, z0))
+    c.physics.fixedBox(p.x, H / 2, p.z, fw / 2, H / 2, 0.12, plotFrame(c.plot).yaw)
+  }
+  // door frame and a gold canopy over the entrance
+  b.box(door + 0.4, 0.3, 0.3, dark, c.at(0, 3.6, z0))
+  b.box(door + 3.5, 0.28, 3.2, gold, c.at(0, 3.9, z0 + 1.6))
+  for (const sx of [-1, 1]) b.box(0.2, 3.9, 0.2, gold, c.at(sx * (door / 2 + 1.6), 1.95, z0 + 3))
+  // mezzanine slab (rear 2/3) and roof
+  const mz = z1 + 8 // slab spans the back 16 m
+  solid(c, 0, F + 0.15, (mz + z1) / 2 + 0.2, W - 0.8, 0.3, mz - z1 - 0.4 + 7.6, floorMat)
+  solid(c, 0, H + 0.2, zc, W + 1.6, 0.4, D + 1.6, m.trim)
+  b.box(W + 2, 0.5, 0.5, gold, c.at(0, H + 0.65, z0 + 0.8))
+  // the mezzanine opening: slab is split so there is a double-height void at the front
+  // (the slab above starts 8 m behind the front line; the void is simply the part with no slab)
+
+  // staircase along the left wall up to the mezzanine
+  const steps = 16
+  const rise = F / steps
+  for (let i = 0; i < steps; i++) {
+    const sz = z0 - 4 - i * 0.42
+    solid(c, -W / 2 + 3.2, (i + 1) * rise / 2, sz, 2.4, (i + 1) * rise, 0.42, wood, 1)
+  }
+  b.box(0.08, 1.0, steps * 0.42, gold, c.at(-W / 2 + 4.45, 2.4, z0 - 4 - steps * 0.21))
+  // glass balustrade along the mezzanine edge
+  b.add(new THREE.PlaneGeometry(W - 6, 1.1), glass, c.at(0, F + 0.9, z0 - 11.2))
+  b.box(W - 6, 0.06, 0.06, gold, c.at(0, F + 1.45, z0 - 11.2))
+
+  // reception under the logo wall
+  solid(c, 0, 0.55, z1 + 5, 7, 1.1, 1.4, wood, 1)
+  b.box(7.2, 0.08, 1.6, m.marble, c.at(0, 1.14, z1 + 5), 2)
+  const logo = new THREE.Mesh(new THREE.PlaneGeometry(14, 14 * (288 / 1536) * 1.1), new THREE.MeshStandardMaterial({ map: signTexture(c.spec.title, c.spec.sub, '#141218', '#e8b923', c.spec.logo ? (c.tex.get(c.spec.logo)?.image as HTMLImageElement | undefined) : undefined), emissive: '#fff', emissiveIntensity: 0.6 }))
+  ;(logo.material as THREE.MeshStandardMaterial).emissiveMap = (logo.material as THREE.MeshStandardMaterial).map
+  logo.applyMatrix4(c.at(0, 3.2, z1 + 0.25))
+  c.group.add(logo)
+
+  // open-plan desks: three rows of paired workstations with screens and chairs
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 4; col++) {
+      const x = -13 + col * 7.2 + (col > 1 ? 4 : 0)
+      const z = z0 - 8 - row * 3.6
+      if (x < -W / 2 + 6.5 && z > z0 - 4 - steps * 0.42 - 1) continue
+      solid(c, x, 0.74, z, 3.2, 0.06, 1.3, wood, 1)
+      for (const sx of [-1, 1]) b.box(0.05, 0.72, 1.1, dark, c.at(x + sx * 1.5, 0.36, z))
+      for (const sx of [-0.8, 0.8]) {
+        b.box(0.7, 0.42, 0.04, screenMat, c.at(x + sx, 1.07, z - 0.35))
+        b.box(0.12, 0.3, 0.12, dark, c.at(x + sx, 0.9, z - 0.3))
+        b.box(0.5, 0.06, 0.5, dark, c.at(x + sx, 0.5, z + 0.9), 1) // chair seat
+        b.box(0.5, 0.5, 0.06, dark, c.at(x + sx, 0.8, z + 1.15), 1)
+      }
+    }
+  }
+  // glass meeting room on the right: table, chairs, a wall screen
+  const mrx = W / 2 - 6
+  const mrz = z0 - 9
+  b.add(new THREE.PlaneGeometry(10, 3.6), glass, c.at(mrx - 5, 1.9, mrz - 3, Math.PI / 2))
+  b.add(new THREE.PlaneGeometry(10, 3.6), glass, c.at(mrx, 1.9, mrz + 5))
+  solid(c, mrx, 0.74, mrz, 5, 0.08, 1.8, wood, 1)
+  for (let i = 0; i < 5; i++) for (const sz of [-1.3, 1.3]) b.box(0.5, 0.5, 0.5, dark, c.at(mrx - 2 + i, 0.5, mrz + sz), 1)
+  b.box(3.4, 1.8, 0.1, screenMat, c.at(mrx, 2.1, z1 + 0.5))
+  // lounge with sofas by the entrance
+  for (const sx of [-1, 1]) {
+    solid(c, sx * 12, 0.4, z0 - 3, 4.2, 0.8, 1.1, sofa, 1)
+    b.box(4.2, 0.6, 0.3, sofa, c.at(sx * 12, 0.9, z0 - 3.6), 1)
+  }
+  // upstairs: a long table, sofas and a screen wall
+  const uz = z1 + 4
+  solid(c, 4, F + 0.75, uz, 8, 0.08, 1.8, wood, 1)
+  solid(c, -8, F + 0.5, uz + 1, 5, 0.9, 1.2, sofa, 1)
+  solid(c, 14, F + 0.5, uz + 1, 5, 0.9, 1.2, sofa, 1)
+  b.box(8, 2.2, 0.1, screenMat, c.at(4, F + 2.2, z1 + 0.5))
+  // gold ribbons on the facade and the rooftop name
+  for (const y of [F, H]) b.box(W + 0.4, 0.22, 0.3, gold, c.at(0, y, z0 + 0.05))
+  // a few plants
+  const plant = c.models.get('potted_plant_01')
+  if (plant) {
+    for (const x of [-17, -5, 5, 17]) {
+      const g = plant.scene.clone(true)
+      g.applyMatrix4(c.at(x, 0.27, z0 - 1.6, 0).multiply(M(0, 0, 0, 0, 1.1, 1.1, 1.1)))
+      c.group.add(g)
+    }
+  }
+
+  // lights: ceiling panels glow all day, real lights after dark
+  for (const x of [-14, 0, 14]) for (const z of [z0 - 5, z0 - 13, z0 - 20]) {
+    b.box(5, 0.06, 0.5, c.lampMat, c.at(x, F - 0.12, z))
+    b.box(5, 0.06, 0.5, c.lampMat, c.at(x, H - 0.12, z))
+  }
+  for (const [x, y, z] of [[-12, 3.5, z0 - 7], [12, 3.5, z0 - 7], [0, 3.5, z0 - 17], [-10, F + 3.5, zc], [10, F + 3.5, zc]] as const) nightLight(c, x, y, z, '#fff0d8', 22, 18)
+  // exterior uplighting on the facade
+  for (const x of [-14, 14]) nightLight(c, x, 1.2, z0 + 3, '#ffd79a', 18, 14)
+  // lit sign over the entrance and gold trim
+  sign(c, 14, 0, H + 2.4, z0 + 0.9)
 }
 
 export const ESTATE = {
@@ -358,16 +503,20 @@ const SPECS: Record<string, Spec> = {
   xeta: {
     title: 'Xeta Labs', sub: 'Assam · Intern 2024 → Full-stack 2025', accent: '#0d1620', ink: '#3fe0b8',
     build(c) {
-      const placed = placeModel(c, 'office', 0, -12, 0, { passable: /glass|window|door/i })
+      // the loft office, scaled up to a real office floor, its glass front turned to the street
+      const S = 1.55
+      const placed = placeModel(c, 'office', -3.5, -13.5, -Math.PI / 2, { passable: /glass|window|door/i, scale: S })
       const { b } = c
-      const neon = new THREE.MeshStandardMaterial({ color: '#3fe0b8', emissive: '#3fe0b8', emissiveIntensity: 1.2 })
+      const neon = new THREE.MeshStandardMaterial({ color: '#3fe0b8', emissive: '#3fe0b8', emissiveIntensity: 1.4 })
       if (placed) {
-        // teal neon outline along the roof edge and a rooftop sign
-        b.box(15.6, 0.12, 0.12, neon, c.at(0.4, 5.55, -12 + 7.3))
-        b.box(15.6, 0.12, 0.12, neon, c.at(0.4, 5.55, -12 - 4.6))
-        nightLight(c, 0, 3.6, -12, '#d8fff4', 30, 18)
+        // a rooftop sign on two posts, teal neon under it and along the pavement
+        for (const x of [-4.2, 4.2]) b.box(0.25, 1.6, 0.25, c.m.frame, c.at(x, 10.3, -4))
+        b.box(11.4, 0.1, 0.1, neon, c.at(0, 9.7, -2.6))
+        nightLight(c, 0, 4.5, -10, '#d8fff4', 36, 22)
+        nightLight(c, 0, 4.5, -18, '#d8fff4', 30, 20)
+        nightLight(c, 0, 1.5, 2.5, '#3fe0b8', 22, 16)
       }
-      sign(c, 12, 0, 7.4, -6)
+      sign(c, 11, 0, 11.6, -4)
       screen(c, 8, -10, 3.4, -3)
     },
   },
@@ -409,16 +558,10 @@ const SPECS: Record<string, Spec> = {
   gobt: {
     title: 'GOBT', sub: 'Group Of Blooming Technicians · HQ', accent: '#141218', ink: '#e8b923', logo: 'img/logos/gobt.webp', screen: 'img/tex/gobt.webp',
     build(c) {
-      // the GOBT campus: HQ office in the middle, apartment towers around a landscaped court
-      const placed = placeModel(c, 'campus', 0, -40, 0, { passable: /glass|window|door/i, floor: 0.66 })
-      const { b } = c
-      const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.9, roughness: 0.3, emissive: '#e8a313', emissiveIntensity: 0.2 })
-      if (placed) {
-        b.box(16, 0.18, 0.18, gold, c.at(0.4, 5.75, -40 + 7.4))
-        nightLight(c, 0, 3.6, -40, '#ffe6b0', 30, 18)
-      }
-      sign(c, 14, 0, 3.2, -8)
-      screen(c, 12, 14, 4.2, -9)
+      // head office at the street, with the apartment campus rising behind it
+      gobtHq(c)
+      placeModel(c, 'campus', 0, -60, 0, { passable: /glass|window|door/i, floor: 0.66, scale: 0.68})
+      screen(c, 12, 28, 4.2, -2)
     },
   },
   gharkamali: {

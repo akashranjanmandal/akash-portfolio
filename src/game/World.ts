@@ -108,12 +108,13 @@ export class World {
     halo.width = halo.height = 64
     const hc = halo.getContext('2d')!
     const hgrd = hc.createRadialGradient(32, 32, 0, 32, 32, 32)
-    hgrd.addColorStop(0, 'rgba(255,230,180,1)')
-    hgrd.addColorStop(0.25, 'rgba(255,200,120,0.6)')
+    hgrd.addColorStop(0, 'rgba(255,238,205,0.9)')
+    hgrd.addColorStop(0.12, 'rgba(255,214,150,0.45)')
+    hgrd.addColorStop(0.4, 'rgba(255,190,110,0.1)')
     hgrd.addColorStop(1, 'rgba(255,180,90,0)')
     hc.fillStyle = hgrd
     hc.fillRect(0, 0, 64, 64)
-    this.lampGlow = new THREE.Points(hg, new THREE.PointsMaterial({ map: new THREE.CanvasTexture(halo), color: '#ffffff', size: 3.2, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }))
+    this.lampGlow = new THREE.Points(hg, new THREE.PointsMaterial({ map: new THREE.CanvasTexture(halo), color: '#ffffff', size: 1.7, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }))
     this.lampGlow.visible = false
     this.group.add(this.lampGlow)
     const count = this.quality.tier === 'high' ? 4 : this.quality.tier === 'mid' ? 2 : 0

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { Game } from './game/Game'
 import { Loader } from './ui/Loader'
 import { Phone, stopFor } from './ui/Phone'
+import { WorldMap } from './ui/WorldMap'
 import { Resume } from './ui/Resume'
 import { Toasts } from './ui/Toasts'
 import { AudioEngine } from './audio/AudioEngine'
@@ -22,6 +23,7 @@ export class GameApp {
   private audio = new AudioEngine()
   private near: Spot | null = null
   private waypoint: Spot | null = null
+  private worldMap!: WorldMap
   private beam: THREE.Mesh | null = null
   private visited = new Set<string>(JSON.parse(storage.get('akash:visited') ?? '[]') as string[])
   private mapCtx = ($('minimap') as HTMLCanvasElement).getContext('2d')!
@@ -96,6 +98,24 @@ export class GameApp {
       this.resume.open()
     }
     this.phone.onWaypoint = (id) => this.setWaypoint(id)
+    this.worldMap = new WorldMap(() => ({
+      spots: g.world.landmarks.spots.map((s) => ({ id: s.id, title: s.title, sub: s.sub, x: s.pos.x, z: s.pos.z })),
+      player: { x: g.player.position.x, z: g.player.position.z, yaw: g.player.yaw },
+      vehicles: g.vehicles.map((v) => ({ kind: v.kind, x: v.position.x, z: v.position.z })),
+      waypoint: this.waypoint?.id ?? null,
+      visited: this.visited,
+    }))
+    this.worldMap.onOpen = () => {
+      document.body.classList.add('map-open')
+      this.phone.toggle(false)
+      g.input.enabled = false
+      if (document.pointerLockElement) document.exitPointerLock()
+    }
+    this.worldMap.onClose = () => {
+      document.body.classList.remove('map-open')
+      g.input.enabled = true
+    }
+    this.worldMap.onPick = (id) => this.setWaypoint(id)
     const tram = g.world.town.tram
     if (tram) tram.onBell = (pos) => this.audio.tramBell(Math.max(0, 1 - pos.distanceTo(g.player.position) / 140))
     const timeBtn = $('btn-time')
@@ -129,6 +149,7 @@ export class GameApp {
       if (!el) return
       if (el.dataset.action === 'phone') this.phone.toggle()
       if (el.dataset.action === 'resume') this.resume.open()
+      if (el.dataset.action === 'map') this.worldMap.toggle()
     })
     $('near-btn').addEventListener('click', () => this.openNear())
     $('btn-sound').addEventListener('click', () => {
@@ -149,7 +170,8 @@ export class GameApp {
         e.preventDefault()
         this.phone.toggle()
       }
-      if (e.code === 'KeyE' && !e.repeat && !this.phone.open) this.openNear()
+      if (e.code === 'KeyM' && !e.repeat && !this.resume.isOpen) this.worldMap.toggle()
+      if (e.code === 'KeyE' && !e.repeat && !this.phone.open && !this.worldMap.isOpen) this.openNear()
     })
     document.addEventListener('pointerlockchange', () => $('lockhint').classList.toggle('is-on', !document.pointerLockElement && !this.phone.open))
   }
@@ -226,6 +248,7 @@ export class GameApp {
     const speedEl = $('speed')
     speedEl.hidden = !v
     if (v) $('speed-num').textContent = String(Math.round(Math.abs(v.speed) * 3.6))
+    if (v?.kind === 'car') this.audio.setVoice((v as import('./game/Vehicles').Car).profile.name)
     this.audio.update(v?.kind === 'car' ? v.speed : 0, v?.kind === 'car' ? Math.min(1, Math.abs(g.input.move.y)) : 0, false, v?.kind === 'car', g.env.night)
     // footsteps keep time with the stride
     const gait = p.gait
