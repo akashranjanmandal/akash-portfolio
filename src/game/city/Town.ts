@@ -471,11 +471,23 @@ export class Town {
         material.opacity = 1
         this.lampGlass = material
       }
-      const inst = new THREE.InstancedMesh(mesh.geometry, material, mats.length)
-      mats.forEach((mat, k) => inst.setMatrixAt(k, mat.clone().multiply(mesh.matrixWorld)))
-      inst.castShadow = true
-      inst.computeBoundingSphere()
-      this.group.add(inst)
+      // one InstancedMesh per 100 m cell, so lamps far from the camera are culled (and skip the shadow pass)
+      const cells = new Map<string, THREE.Matrix4[]>()
+      const pos = new THREE.Vector3()
+      for (const mat of mats) {
+        pos.setFromMatrixPosition(mat)
+        const key = `${Math.floor(pos.x / 100)},${Math.floor(pos.z / 100)}`
+        let arr = cells.get(key)
+        if (!arr) cells.set(key, (arr = []))
+        arr.push(mat)
+      }
+      for (const list of cells.values()) {
+        const inst = new THREE.InstancedMesh(mesh.geometry, material, list.length)
+        list.forEach((mat, k) => inst.setMatrixAt(k, mat.clone().multiply(mesh.matrixWorld)))
+        inst.castShadow = true
+        inst.computeBoundingSphere()
+        this.group.add(inst)
+      }
     })
   }
 

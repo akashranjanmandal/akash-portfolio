@@ -12,7 +12,7 @@ import { GARAGE, buildSupercar } from './Supercar'
 import * as THREE from 'three'
 
 export const MODELS = [
-  'avatar', 'xbot-anims', 'bike', 'tram', 'car-bugatti', 'car-jesko', 'car-lambo', 'car-bmw', 'bungalow', 'office', 'campus', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
+  'man', 'xbot-anims', 'bike', 'tram', 'car-bugatti', 'car-jesko', 'car-lambo', 'car-bmw', 'bungalow', 'office', 'campus', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
   'rollershutter_door', 'painted_wooden_bench', 'metal_trash_can', 'fire_hydrant', 'planter_box_01', 'concrete_road_barrier', 'potted_plant_01',
 ]
 export const IMAGES = ['picaku', 'lifeapp', 'pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'mastermind', 'gftd', 'agile', 'ideashapers']
@@ -52,7 +52,7 @@ export class Game {
     this.world.build()
     onProgress(0.92)
     const spawn = this.world.spawn
-    this.player = new Player(this.physics, this.assets.models.get('avatar')!, this.assets.models.get('xbot-anims')!, spawn.pos)
+    this.player = new Player(this.physics, this.assets.models.get('man')!, this.assets.models.get('xbot-anims')!, spawn.pos)
     this.player.teleport(spawn.pos, spawn.yaw)
     this.engine.scene.add(this.player.root)
     this.spawnVehicles()

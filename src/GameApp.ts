@@ -286,17 +286,17 @@ export class GameApp {
     const g = bg.getContext('2d')!
     g.fillStyle = '#35553f'
     g.fillRect(0, 0, S, S)
-    const span = 900
+    const span = 1100
     const P = (v: number) => ((v + span / 2) / span) * S
     g.fillStyle = '#4f6d7a'
     g.fillRect(P(-312), 0, P(-232) - P(-312), S)
     g.fillStyle = '#d8d2c6'
     for (const v of GRID) {
-      g.fillRect(P(v - 5), P(-205), P(v + 5) - P(v - 5), P(205) - P(-205))
-      g.fillRect(P(-205), P(v - 5), P(205) - P(-205), P(v + 5) - P(v - 5))
+      g.fillRect(P(v - 5), P(GRID[0] - 5), P(v + 5) - P(v - 5), P(GRID[GRID.length - 1] + 5) - P(GRID[0] - 5))
+      g.fillRect(P(GRID[0] - 5), P(v - 5), P(GRID[GRID.length - 1] + 5) - P(GRID[0] - 5), P(v + 5) - P(v - 5))
     }
-    g.fillRect(P(-400), P(-5), P(-205) - P(-400), P(5) - P(-5))
-    g.fillRect(P(-5), P(-330), P(5) - P(-5), P(-205) - P(-330))
+    g.fillRect(P(-400), P(-5), P(GRID[0] - 5) - P(-400), P(5) - P(-5))
+    g.fillRect(P(-5), P(-330), P(5) - P(-5), P(GRID[0] - 5) - P(-330))
     this.mapBg = bg
   }
 
@@ -304,7 +304,7 @@ export class GameApp {
     const c = this.mapCtx
     const W = c.canvas.width
     if (!this.mapBg) return
-    const span = 900
+    const span = 1100
     const zoom = 2.2
     c.save()
     c.clearRect(0, 0, W, W)

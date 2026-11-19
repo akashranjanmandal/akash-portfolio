@@ -9,7 +9,7 @@ import { Howrah, riverDepth, STATION } from './city/Howrah'
 import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
 import { Landmarks } from './city/Landmarks'
-import { PLOTS, plotFrame, SPAWN, SIGHTS } from './city/Plan'
+import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -17,20 +17,29 @@ import { PLOTS, plotFrame, SPAWN, SIGHTS } from './city/Plan'
    rolling hills towards the rim, beaches, then open sea.
 ────────────────────────────────────────────────────────────── */
 
-export const SIZE = 1400 // terrain extent
+export const SIZE = 1800 // terrain extent
 export const SEA = -1.6
-const SEG = 280
+const SEG = 360
 
 /** terrain height at (x, z) — flat town, hills at the rim, beach, seabed */
 export function heightAt(x: number, z: number) {
   return groundAt(x, z) - riverDepth(x)
 }
 
+/** distance from (x, z) to the "land" rectangle: the town, the river, the station and the memorial road */
+const LAND = { x0: -385, x1: 410, z0: -345, z1: 410 }
+function landDist(x: number, z: number) {
+  const dx = Math.max(LAND.x0 - x, 0, x - LAND.x1)
+  const dz = Math.max(LAND.z0 - z, 0, z - LAND.z1)
+  return Math.hypot(dx, dz)
+}
+
 function groundAt(x: number, z: number) {
-  const r = Math.hypot(x / 1.15, z)
+  // r = 300 on the edge of the land, then hills, then the sea, wherever you leave it from
+  const r = 300 + landDist(x, z)
   const n = noise2(x * 0.006 + 11, z * 0.006 - 4) * 0.65 + noise2(x * 0.02, z * 0.02) * 0.35
   // under the paved town the ground sits just below the asphalt; undulation starts outside it
-  if (Math.abs(x) < 208 && Math.abs(z) < 208) return -0.08
+  if (inTown(x, z)) return -0.08
   const flat = r < 300 ? 0 : (noise2(x * 0.01, z * 0.01) - 0.5) * 0.6 * Math.min(1, (r - 300) / 40)
   if (r < 360) return flat
   if (r < 470) {
@@ -89,6 +98,9 @@ export class World {
   private lampGlow!: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>
   private lampLights: THREE.PointLight[] = []
   private lampTimer = 0
+  /** static chunks that are switched off beyond the draw distance */
+  private cullables: { m: THREE.Mesh; c: THREE.Vector3; r: number }[] = []
+  private cullTimer = 0
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer, private physics: Physics, private assets: Assets, private quality: Quality) {
     scene.add(this.group)
@@ -123,16 +135,21 @@ export class World {
       this.lampLights.push(l)
       this.group.add(l)
     }
-    // an invisible fence along the hill crests so nobody drives off into the sea
-    for (let i = 0; i < 64; i++) {
-      const a0 = (i / 64) * Math.PI * 2
-      const a1 = ((i + 1) / 64) * Math.PI * 2
-      const R = 455
-      const x0 = Math.cos(a0) * R * 1.15, z0 = Math.sin(a0) * R
-      const x1 = Math.cos(a1) * R * 1.15, z1 = Math.sin(a1) * R
-      const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2
-      const len = Math.hypot(x1 - x0, z1 - z0)
-      this.physics.fixedBox(mx, heightAt(mx, mz) + 5, mz, 0.5, 12, len / 2 + 1, Math.atan2(x1 - x0, z1 - z0))
+    // an invisible fence along the hill crests (a rounded rectangle around the land) so nobody drives into the sea
+    {
+      const D = 150
+      const pts: [number, number][] = []
+      const x0 = LAND.x0 - D, x1 = LAND.x1 + D, z0 = LAND.z0 - D, z1 = LAND.z1 + D
+      for (let x = x0; x < x1; x += 50) pts.push([x, z0])
+      for (let z = z0; z < z1; z += 50) pts.push([x1, z])
+      for (let x = x1; x > x0; x -= 50) pts.push([x, z1])
+      for (let z = z1; z > z0; z -= 50) pts.push([x0, z])
+      for (let i = 0; i < pts.length; i++) {
+        const [ax, az] = pts[i]
+        const [bx, bz] = pts[(i + 1) % pts.length]
+        const mx = (ax + bx) / 2, mz = (az + bz) / 2
+        this.physics.fixedBox(mx, heightAt(mx, mz) + 5, mz, 0.5, 14, Math.hypot(bx - ax, bz - az) / 2 + 1, Math.atan2(bx - ax, bz - az))
+      }
     }
     this.howrah = new Howrah(this.physics, this.town.mats)
     this.traffic = new Traffic(this.physics, this.quality.tier === 'low' ? 6 : 12)
@@ -143,6 +160,16 @@ export class World {
     this.landmarks.build()
     for (const s of SIGHTS) this.landmarks.spots.push({ id: s.id, title: s.label, sub: s.sub, pos: new THREE.Vector3(s.x, 0, s.z), yaw: 0 })
     this.group.add(this.landmarks.group)
+    for (const g of [this.town.group, this.landmarks.group]) {
+      for (const o of g.children) {
+        const m = o as THREE.Mesh
+        if (!m.isMesh || (m as THREE.InstancedMesh).isInstancedMesh) continue
+        m.updateMatrixWorld(true)
+        if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere()
+        const bs = m.geometry.boundingSphere!
+        this.cullables.push({ m, c: bs.center.clone().applyMatrix4(m.matrixWorld), r: bs.radius })
+      }
+    }
     // one point cloud for every fairy-light string in town and on the landmarks
     this.fairy = new FairyLights({ pos: [...this.town.fairyBuf.pos, ...this.landmarks.fairy.pos], col: [...this.town.fairyBuf.col, ...this.landmarks.fairy.col] })
     this.group.add(this.fairy.points)
@@ -234,8 +261,8 @@ export class World {
     const pick = (count: number, test: (x: number, z: number) => boolean, scale = 1) => {
       const out: THREE.Matrix4[] = []
       for (let i = 0; i < count * 20 && out.length < count; i++) {
-        const x = (r() - 0.5) * 920
-        const z = (r() - 0.5) * 800
+        const x = -20 + (r() - 0.5) * 1300
+        const z = 20 + (r() - 0.5) * 1200
         if (!test(x, z)) continue
         const y = heightAt(x, z)
         if (y < SEA + 1.2) continue
@@ -255,7 +282,7 @@ export class World {
       if (riverDepth(x) > 0 || riverDepth(x - 6) > 0 || riverDepth(x + 6) > 0) return false
       if (x < -200 && Math.abs(z) < 12) return false
       if (Math.abs(x - STATION.x) < 26 && Math.abs(z - STATION.z) < 56) return false
-      const town = Math.abs(x) < 215 && Math.abs(z) < 215
+      const town = inTown(x, z, 5)
       if (town && !inBlockMiddle(x, z)) return false
       return !plots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)
     }
@@ -298,6 +325,12 @@ export class World {
   }
 
   update(dt: number, t: number, player: THREE.Vector3) {
+    this.cullTimer -= dt
+    if (this.cullTimer <= 0) {
+      this.cullTimer = 0.25
+      const far = this.quality.tier === 'high' ? 340 : this.quality.tier === 'mid' ? 270 : 210
+      for (const e of this.cullables) e.m.visible = Math.hypot(e.c.x - player.x, e.c.z - player.z) - e.r < far
+    }
     this.town.update(dt)
     this.town.tram?.setNight(this.night)
     const tram = this.town.tram?.group.position

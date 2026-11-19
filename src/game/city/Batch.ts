@@ -3,16 +3,21 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 
 /** Collects geometry per material and merges it into one mesh per material (few draw calls). */
 export class Batch {
-  private parts = new Map<THREE.Material, THREE.BufferGeometry[]>()
+  private parts = new Map<string, { mat: THREE.Material; list: THREE.BufferGeometry[] }>()
+  /** geometry is grouped per material per CHUNK-metre cell so off-screen cells are frustum-culled */
+  static CHUNK = 100
 
   add(geo: THREE.BufferGeometry, mat: THREE.Material, matrix?: THREE.Matrix4) {
     const g = geo.index ? geo.toNonIndexed() : geo.clone()
     if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2))
     for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k)
     if (matrix) g.applyMatrix4(matrix)
-    let list = this.parts.get(mat)
-    if (!list) this.parts.set(mat, (list = []))
-    list.push(g)
+    g.computeBoundingBox()
+    const c = g.boundingBox!.getCenter(new THREE.Vector3())
+    const key = `${mat.uuid}|${Math.floor(c.x / Batch.CHUNK)}|${Math.floor(c.z / Batch.CHUNK)}`
+    let e = this.parts.get(key)
+    if (!e) this.parts.set(key, (e = { mat, list: [] }))
+    e.list.push(g)
   }
 
   /** a box whose UVs are in metres / texScale, so textures keep real-world size */
@@ -35,7 +40,7 @@ export class Batch {
   }
 
   build(group: THREE.Group, opts: { cast?: boolean; receive?: boolean } = {}) {
-    for (const [mat, list] of this.parts) {
+    for (const { mat, list } of this.parts.values()) {
       const geo = mergeGeometries(list, false)
       if (!geo) continue
       geo.computeBoundingSphere()

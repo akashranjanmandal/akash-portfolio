@@ -5,10 +5,12 @@
    is filled with ordinary town buildings and greenery.
 ────────────────────────────────────────────────────────────── */
 
-export const GRID = [-200, -100, 0, 100, 200]
+export const GRID = [-200, -100, 0, 100, 200, 300, 400]
 export const ROAD_W = 10
 export const WALK_W = 3.5
-export const TOWN = 240 // half-size of the paved town
+/** the paved town: streets run to the west bank (x = -200) and out east and south to 400 */
+export const TOWN_RECT = { x0: -210, x1: 410, z0: -210, z1: 410 }
+export const inTown = (x: number, z: number, pad = 0) => x > TOWN_RECT.x0 - pad && x < TOWN_RECT.x1 + pad && z > TOWN_RECT.z0 - pad && z < TOWN_RECT.z1 + pad
 
 export type Face = 'n' | 's' | 'e' | 'w'
 

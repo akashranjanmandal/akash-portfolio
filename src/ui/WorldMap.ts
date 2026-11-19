@@ -14,9 +14,9 @@ export type MapState = {
 }
 
 // the view covers the river, the station on the far bank, the town and the memorial to the north
-const SPAN = 720
-const CX = -80
-const CZ = -40
+const SPAN = 880
+const CX = 10
+const CZ = 35
 
 export class WorldMap {
   private root = document.getElementById('worldmap')!
@@ -134,11 +134,11 @@ export class WorldMap {
     for (let i = 0; i < GRID.length - 1; i++) for (let j = 0; j < GRID.length - 1; j++) c.fillRect(PX(GRID[i] + 6), PZ(GRID[j] + 6), (GRID[i + 1] - GRID[i] - 12) * k, (GRID[j + 1] - GRID[j] - 12) * k)
     c.fillStyle = '#cfc9bb'
     for (const v of GRID) {
-      c.fillRect(PX(v - 5), PZ(-205), 10 * k, 410 * k)
-      c.fillRect(PX(-205), PZ(v - 5), 410 * k, 10 * k)
+      c.fillRect(PX(v - 5), PZ(GRID[0] - 5), 10 * k, (GRID[GRID.length - 1] - GRID[0] + 10) * k)
+      c.fillRect(PX(GRID[0] - 5), PZ(v - 5), (GRID[GRID.length - 1] - GRID[0] + 10) * k, 10 * k)
     }
-    c.fillRect(PX(-400), PZ(-5), 195 * k, 10 * k)
-    c.fillRect(PX(-5), PZ(-330), 10 * k, 125 * k)
+    c.fillRect(PX(-400), PZ(-5), (GRID[0] - 5 + 400) * k, 10 * k)
+    c.fillRect(PX(-5), PZ(-330), 10 * k, (GRID[0] - 5 + 330) * k)
     // bridge
     c.fillStyle = '#8a8478'
     c.fillRect(PX(-318), PZ(-6), 92 * k, 12 * k)
