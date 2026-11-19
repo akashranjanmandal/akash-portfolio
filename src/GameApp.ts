@@ -119,6 +119,7 @@ export class GameApp {
       g.input.enabled = true
     }
     this.worldMap.onPick = (id) => this.setWaypoint(id)
+    g.world.transit.onBell = (pos) => this.audio.tramBell(Math.max(0, 1 - pos.distanceTo(g.player.position) / 160))
     const tram = g.world.town.tram
     if (tram) tram.onBell = (pos) => this.audio.tramBell(Math.max(0, 1 - pos.distanceTo(g.player.position) / 140))
     const timeBtn = $('btn-time')
@@ -321,7 +322,7 @@ export class GameApp {
     g.fillStyle = '#9a958a'
     g.fillRect(P(HIGHWAY.x - HIGHWAY.w / 2), P(HIGHWAY.z0), P(HIGHWAY.x + HIGHWAY.w / 2) - P(HIGHWAY.x - HIGHWAY.w / 2), P(HIGHWAY.z1) - P(HIGHWAY.z0))
     for (const d of DISTRICTS) {
-      g.fillStyle = d.kind === 'lake' ? '#4f86a0' : '#b9ad94'
+      g.fillStyle = d.kind === 'lake' ? '#4f86a0' : d.kind === 'stadium' ? '#4f8f45' : '#b9ad94'
       if (d.kind === 'lake') {
         g.beginPath()
         g.ellipse(P(d.cx), P(d.cz), P(23) - P(0), P(15) - P(0), 0, 0, Math.PI * 2)

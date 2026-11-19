@@ -6,6 +6,7 @@ import { addFairy, type FairyBuffer } from './Fairy'
 import { DISTRICTS, HIGHWAY } from './Plan'
 import { SCALE } from '../Scale'
 import { rng } from '../../utils/math'
+import { labelTexture } from '../hills/Portal'
 
 /* ──────────────────────────────────────────────────────────────
    DISTRICTS & THE HIGHWAY
@@ -299,6 +300,128 @@ function plaza(c: Ctx, cx: number, cz: number) {
   }
 }
 
+
+/* ── Eden Gardens ───────────────────────────────────────────── */
+
+function stadium(c: Ctx, cx: number, cz: number) {
+  const { b, m, group, out } = c
+  const RX = 25 // the playing field's radii
+  const RZ = 22
+  b.box(2 * HALF, 0.03, 2 * HALF, m.paving, M(cx, CURB + 0.02, cz), 3)
+
+  // the outfield: mown in broad stripes
+  const cv = document.createElement('canvas')
+  cv.width = 64
+  cv.height = 8
+  const g = cv.getContext('2d')!
+  g.fillStyle = '#3d7a37'
+  g.fillRect(0, 0, 32, 8)
+  g.fillStyle = '#4a8d41'
+  g.fillRect(32, 0, 32, 8)
+  const stripe = new THREE.CanvasTexture(cv)
+  stripe.colorSpace = THREE.SRGBColorSpace
+  stripe.wrapS = stripe.wrapT = THREE.RepeatWrapping
+  const fieldGeo = new THREE.CircleGeometry(1, 72).rotateX(-Math.PI / 2)
+  fieldGeo.scale(RX, 1, RZ)
+  fieldGeo.translate(cx, CURB + 0.07, cz)
+  planar(fieldGeo, 6)
+  group.add(Object.assign(new THREE.Mesh(fieldGeo, new THREE.MeshStandardMaterial({ map: stripe, roughness: 0.95 })), { receiveShadow: true }))
+  // boundary rope and the pitch with its creases and stumps
+  const rope = new THREE.RingGeometry(0.992, 1.0, 72).rotateX(-Math.PI / 2)
+  rope.scale(RX, 1, RZ)
+  rope.translate(cx, CURB + 0.1, cz)
+  group.add(new THREE.Mesh(rope, new THREE.MeshBasicMaterial({ color: '#f4f4ee' })))
+  const clay = new THREE.MeshStandardMaterial({ color: '#c9b27c', roughness: 1 })
+  b.box(20.1, 0.02, 3.05, clay, M(cx, CURB + 0.1, cz), 4)
+  for (const s of [-1, 1]) {
+    for (const dz of [-1.3, 0, 1.3]) b.box(3.5, 0.015, 0.05, m.line, M(cx + s * 8.6, CURB + 0.115, cz + dz * 0.0 + (dz === 0 ? 0 : 0)), 1)
+    b.box(0.05, 0.015, 2.64, m.line, M(cx + s * 8.6, CURB + 0.115, cz), 1)
+    b.box(0.05, 0.015, 2.64, m.line, M(cx + s * 10.05, CURB + 0.115, cz), 1)
+    for (const dz of [-0.11, 0, 0.11]) b.box(0.04, 0.7, 0.04, m.wood, M(cx + s * 10.05, CURB + 0.45, cz + dz), 1)
+  }
+
+  // the stands: ten stepped tiers, blue and white, broken at east and west for the gates
+  const SEC = 44
+  const T = 10
+  const rise = 0.55
+  const blue = new THREE.MeshStandardMaterial({ color: '#1d4fa8', roughness: 0.8 })
+  const white = new THREE.MeshStandardMaterial({ color: '#e6eaf2', roughness: 0.8 })
+  const yellow = new THREE.MeshStandardMaterial({ color: '#f2b705', roughness: 0.8 })
+  const rx = (t: number) => RX + 2 + t * 1.0
+  const rz = (t: number) => RZ + 2 + t * 0.95
+  for (let t = 0; t < T; t++) {
+    const mat = t % 4 === 3 ? yellow : t % 2 ? white : blue
+    const h = (t + 1) * rise
+    for (let i = 0; i < SEC; i++) {
+      const a0 = (i / SEC) * Math.PI * 2
+      const a1 = ((i + 1) / SEC) * Math.PI * 2
+      const am = (a0 + a1) / 2
+      if (Math.abs(Math.sin(am)) < 0.17) continue // the gates
+      const rxm = rx(t) + 0.5
+      const rzm = rz(t) + 0.475
+      const x = cx + Math.cos(am) * rxm
+      const z = cz + Math.sin(am) * rzm
+      const dx = Math.cos(a1) * rxm - Math.cos(a0) * rxm
+      const dz = Math.sin(a1) * rzm - Math.sin(a0) * rzm
+      const len = Math.hypot(dx, dz)
+      const yaw = Math.atan2(-dz, dx)
+      b.box(len + 0.04, h, 1.0, mat, M(x, CURB + h / 2, z, yaw), 2)
+      c.physics.fixedBox(x, CURB + h / 2, z, (len + 0.04) / 2, h / 2, 0.5, yaw)
+    }
+  }
+  // rear concourse wall with its own gates, and a canopy over the upper tiers
+  for (let i = 0; i < SEC; i++) {
+    const a0 = (i / SEC) * Math.PI * 2
+    const a1 = ((i + 1) / SEC) * Math.PI * 2
+    const am = (a0 + a1) / 2
+    if (Math.abs(Math.sin(am)) < 0.17) continue
+    const rxm = rx(T) + 0.6
+    const rzm = rz(T) + 0.6
+    const x = cx + Math.cos(am) * rxm
+    const z = cz + Math.sin(am) * rzm
+    const len = Math.hypot((Math.cos(a1) - Math.cos(a0)) * rxm, (Math.sin(a1) - Math.sin(a0)) * rzm)
+    const yaw = Math.atan2(-(Math.sin(a1) - Math.sin(a0)) * rzm, (Math.cos(a1) - Math.cos(a0)) * rxm)
+    b.box(len + 0.04, 9, 0.8, m.plaster[1], M(x, CURB + 4.5, z, yaw), 3)
+    c.physics.fixedBox(x, CURB + 4.5, z, (len + 0.04) / 2, 4.5, 0.4, yaw)
+    if (i % 2 === 0) {
+      const cxr = cx + Math.cos(am) * (rx(5) + 0.5)
+      const czr = cz + Math.sin(am) * (rz(5) + 0.5)
+      b.box(0.3, 7.4, 0.3, m.frame, M(cxr, CURB + 3.7, czr), 1)
+    }
+    const rr = (rx(T) + rx(5)) / 2 + 0.5
+    const rzr = (rz(T) + rz(5)) / 2 + 0.5
+    b.box(len + 0.1, 0.35, rx(T) - rx(5) + 2, white, M(cx + Math.cos(am) * rr, CURB + 7.5, cz + Math.sin(am) * rzr, yaw), 2)
+  }
+  // floodlight pylons at the four corners, lit heads that glow after dark
+  const lamp = new THREE.MeshStandardMaterial({ color: '#fffbe8', emissive: '#fff1c8', emissiveIntensity: 0.3 })
+  out.glow.push({ mat: lamp, day: 0.3, night: 6 })
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    const px = cx + sx * (RX + 14)
+    const pz = cz + sz * (RZ + 11)
+    b.box(1.0, 42, 1.0, m.frame, M(px, CURB + 21, pz), 1)
+    b.box(8, 4.5, 0.7, m.frame, M(px, CURB + 42.5, pz, Math.atan2(sx, sz) + Math.PI), 1)
+    for (let k = -1; k <= 1; k++) for (let j = 0; j < 2; j++) b.box(1.9, 1.7, 0.2, lamp, M(px - sx * 0.9 + k * 2.2 * (sz > 0 ? 1 : 1) * 0.0 + k * 1.1, CURB + 41.6 + j * 1.9, pz - sz * 0.42, Math.atan2(-sx, -sz)), 1)
+    c.physics.fixedCylinder(px, CURB + 4, pz, 0.7, 8)
+  }
+  // scoreboards and the name over the gates
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(14, 4.6), new THREE.MeshStandardMaterial({ map: labelTexture(['EDEN GARDENS', 'Kolkata · since 1864'], '#07121f', '#ffd23a', 1024, 256, '#1d9bf0'), emissive: '#ffffff', roughness: 0.4, emissiveIntensity: 0.6 }))
+  ;(board.material as THREE.MeshStandardMaterial).emissiveMap = (board.material as THREE.MeshStandardMaterial).map
+  board.position.set(cx, CURB + T * rise + 4, cz - rz(T) - 0.2)
+  group.add(board)
+  for (const s of [-1, 1]) {
+    const name = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.2), new THREE.MeshStandardMaterial({ map: labelTexture(['EDEN GARDENS', 'Home of Bengal cricket'], '#0d2f6b', '#ffffff', 1024, 256, '#ffd23a'), roughness: 0.6 }))
+    name.position.set(cx + s * (rx(T) + 1.2), CURB + 10.8, cz)
+    name.rotation.y = s * Math.PI / 2
+    group.add(name)
+  }
+  nightLight(c, cx, CURB, cz, '#e8ffe0', 130, 52)
+  // a few trees outside the stand and lamps on the corners
+  for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]] as const) {
+    tree(c, cx + sx * 37, cz + sz * 33, 1.2)
+    lampAt(c, cx + sx * 38, cz + sz * 38, cx, cz)
+  }
+}
+
 /* ── the Eastern Bypass ─────────────────────────────────────── */
 
 function highway(c: Ctx) {
@@ -381,6 +504,7 @@ export function buildDistricts(b: Batch, m: Materials, physics: Physics, fairy: 
   const c: Ctx = { b, m, physics, fairy, group, out, r: rng(2468) }
   for (const d of DISTRICTS) {
     if (d.kind === 'lake') lake(c, d.cx, d.cz)
+    else if (d.kind === 'stadium') stadium(c, d.cx, d.cz)
     else plaza(c, d.cx, d.cz)
   }
   highway(c)

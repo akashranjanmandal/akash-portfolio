@@ -9,6 +9,7 @@ import { Howrah, riverDepth, STATION } from './city/Howrah'
 import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
 import { buildPortal } from './hills/Portal'
+import { Transit } from './city/Transit'
 import { Landmarks } from './city/Landmarks'
 import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt } from './city/Plan'
 
@@ -42,6 +43,11 @@ function groundAt(x: number, z: number) {
   if (hz < 40) {
     const t = Math.min(1, Math.max(0, (hz - 24) / 14))
     return -0.08 * (1 - t) + g * t
+  }
+  // the suburban railway south of the grid sits on a flat strip too
+  if (x > -215 && x < 435) {
+    const rz = Math.abs(z - 459)
+    if (rz < 48) return -0.08 * (1 - Math.min(1, Math.max(0, (rz - 32) / 16))) + g * Math.min(1, Math.max(0, (rz - 32) / 16))
   }
   return g
 }
@@ -104,6 +110,7 @@ export class World {
   howrah!: Howrah
   traffic!: Traffic
   fairy!: FairyLights
+  transit!: Transit
   /** positions the traffic should brake for besides the player (e.g. the player's taxi) */
   obstacles: THREE.Vector3[] = []
   night = 0
@@ -175,6 +182,8 @@ export class World {
     this.landmarks.build()
     for (const s of SIGHTS) this.landmarks.spots.push({ id: s.id, title: s.label, sub: s.sub, pos: new THREE.Vector3(s.x, 0, s.z), yaw: 0 })
     this.group.add(this.landmarks.group)
+    this.transit = new Transit(this.physics, this.town.mats)
+    this.group.add(this.transit.group)
     for (const g of [this.town.group, this.landmarks.group]) {
       for (const o of g.children) {
         const m = o as THREE.Mesh
@@ -350,6 +359,7 @@ export class World {
       for (const e of this.cullables) e.m.visible = Math.hypot(e.c.x - player.x, e.c.z - player.z) - e.r < far
     }
     this.town.update(dt)
+    this.transit.update(dt, this.night)
     this.town.tram?.setNight(this.night)
     const tram = this.town.tram?.group.position
     this.traffic.update(dt, player, tram ? [...this.obstacles, tram] : this.obstacles, this.night)

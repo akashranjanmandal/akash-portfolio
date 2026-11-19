@@ -88,15 +88,19 @@ export const SIGHTS = [
   { id: 'sarobar', label: 'Rabindra Sarobar', sub: 'Lakeside promenade', x: 250, z: 50 },
   { id: 'minar', label: 'Shaheed Minar Plaza', sub: 'Pedestrian esplanade', x: 250, z: -50 },
   { id: 'bypass', label: 'Eastern Bypass', sub: 'The highway', x: 450, z: 100 },
+  { id: 'eden', label: 'Eden Gardens', sub: 'The cricket cathedral', x: 150, z: 250 },
+  { id: 'sealdah', label: 'Sealdah terminal', sub: 'Suburban trains · level crossing', x: 135, z: 436 },
+  { id: 'esplanade', label: 'Esplanade metro', sub: 'Kolkata Metro, on the viaduct', x: 0, z: 100 },
 ]
 
 /** the Eastern Bypass: a divided highway running north-south beyond the east edge of the grid */
 export const HIGHWAY = { x: 450, z0: -500, z1: 415, w: 31 }
 
 /** special blocks that are not lined with shop-houses (block centres on the grid) */
-export type DistrictKind = 'lake' | 'plaza'
+export type DistrictKind = 'lake' | 'plaza' | 'stadium'
 export const DISTRICTS: { id: string; kind: DistrictKind; cx: number; cz: number; label: string; sub: string }[] = [
   { id: 'sarobar', kind: 'lake', cx: 250, cz: 50, label: 'Rabindra Sarobar', sub: 'Lakeside promenade' },
   { id: 'minar', kind: 'plaza', cx: 250, cz: -50, label: 'Shaheed Minar Plaza', sub: 'Pedestrian esplanade' },
+  { id: 'eden', kind: 'stadium', cx: 150, cz: 250, label: 'Eden Gardens', sub: 'The cricket cathedral' },
 ]
 export const districtAt = (x: number, z: number) => DISTRICTS.find((d) => Math.abs(x - d.cx) < 50 && Math.abs(z - d.cz) < 50)

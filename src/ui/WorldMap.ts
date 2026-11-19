@@ -165,8 +165,12 @@ export class WorldMap {
         c.ellipse(PX(d.cx), PZ(d.cz), 23 * k, 15 * k, 0, 0, Math.PI * 2)
         c.fill()
       } else {
-        c.fillStyle = '#b9ad94'
-        c.fillRect(PX(d.cx - 41), PZ(d.cz - 41), 82 * k, 82 * k)
+        c.fillStyle = d.kind === 'stadium' ? '#4f8f45' : '#b9ad94'
+        if (d.kind === 'stadium') {
+          c.beginPath()
+          c.ellipse(PX(d.cx), PZ(d.cz), 38 * k, 35 * k, 0, 0, Math.PI * 2)
+          c.fill()
+        } else c.fillRect(PX(d.cx - 41), PZ(d.cz - 41), 82 * k, 82 * k)
       }
     }
     // bridge
