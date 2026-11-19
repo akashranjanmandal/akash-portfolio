@@ -3,7 +3,8 @@ import type { Physics } from '../Physics'
 import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
 import { SCALE } from '../Scale'
-import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame } from './Plan'
+import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame, districtAt } from './Plan'
+import { buildDistricts, type DistrictOut } from './Districts'
 import { rng } from '../../utils/math'
 import { addFairy, FairyLights, type FairyBuffer } from './Fairy'
 import { kerbStripes, wires, tramLine, Tram, streetLife, victoriaMemorial } from './Kolkata'
@@ -328,6 +329,7 @@ export class Town {
 
   tram: Tram | null = null
   readonly fairyBuf: FairyBuffer = { pos: [], col: [] }
+  districts: DistrictOut = { trees: [], lamps: [], pools: [], glow: [], water: [] }
   fairy: FairyLights | null = null
   update(dt: number) {
     this.tram?.update(dt)
@@ -341,6 +343,7 @@ export class Town {
     tramLine(b)
     streetLife(b, this.mats, this.physics)
     victoriaMemorial(b, this.mats, this.physics)
+    this.districts = buildDistricts(b, this.mats, this.physics, this.fairyBuf, this.group)
     b.build(this.group)
     this.lamps()
     this.buildPools()
@@ -397,7 +400,7 @@ export class Town {
           b.box(size + 0.3, CURB + 0.02, 0.3, m.kerb, M(cx + dx, (CURB + 0.02) / 2, cz + dz, yaw), 1)
         }
         const inner = size - WALK_W * 2
-        b.box(inner, 0.02, inner, m.grass, M(cx, CURB + 0.01, cz), 6)
+        if (!districtAt(cx, cz)) b.box(inner, 0.02, inner, m.grass, M(cx, CURB + 0.01, cz), 6)
         this.physics.fixedBox(cx, CURB / 2, cz, size / 2, CURB / 2, size / 2)
       }
     }
@@ -415,6 +418,7 @@ export class Town {
       for (let j = 0; j < GRID.length - 1; j++) {
         const cx = (GRID[i] + GRID[i + 1]) / 2
         const cz = (GRID[j] + GRID[j + 1]) / 2
+        if (districtAt(cx, cz)) continue
         for (const [fx, fz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
           // walk along this block edge placing buildings of random width
           let t = -BLOCK_HALF + 2
@@ -457,6 +461,11 @@ export class Town {
           }
         }
       }
+    }
+    for (const [px, pz, yaw] of this.districts.lamps) {
+      mats.push(M(px, CURB, pz, yaw, 1.6, 1.6, 1.6))
+      this.lampPositions.push(new THREE.Vector3(px, 0, pz))
+      this.physics.fixedCylinder(px, 2.5, pz, 0.18, 5)
     }
     lamp.updateMatrixWorld(true)
     lamp.traverse((o) => {
@@ -529,5 +538,7 @@ export class Town {
     }
     this.mats.glassLit.emissiveIntensity = n * 0.38
     this.mats.shopGlass.emissiveIntensity = 0.12 + n * 0.75
+    for (const p of this.districts.pools) p.mat.opacity = n > 0.3 ? p.peak * n : 0
+    for (const g of this.districts.glow) g.mat.emissiveIntensity = n > 0.3 ? g.night * n : g.day
   }
 }

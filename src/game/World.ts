@@ -9,7 +9,7 @@ import { Howrah, riverDepth, STATION } from './city/Howrah'
 import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
 import { Landmarks } from './city/Landmarks'
-import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID } from './city/Plan'
+import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -35,6 +35,17 @@ function landDist(x: number, z: number) {
 }
 
 function groundAt(x: number, z: number) {
+  const g = baseGround(x, z)
+  // the bypass is built on a flat strip that blends back into the land
+  const hz = z > HIGHWAY.z0 - 40 && z < HIGHWAY.z1 + 40 ? Math.abs(x - HIGHWAY.x) : 999
+  if (hz < 40) {
+    const t = Math.min(1, Math.max(0, (hz - 24) / 14))
+    return -0.08 * (1 - t) + g * t
+  }
+  return g
+}
+
+function baseGround(x: number, z: number) {
   // r = 300 on the edge of the land, then hills, then the sea, wherever you leave it from
   const r = 300 + landDist(x, z)
   const n = noise2(x * 0.006 + 11, z * 0.006 - 4) * 0.65 + noise2(x * 0.02, z * 0.02) * 0.35
@@ -282,6 +293,8 @@ export class World {
       if (riverDepth(x) > 0 || riverDepth(x - 6) > 0 || riverDepth(x + 6) > 0) return false
       if (x < -200 && Math.abs(z) < 12) return false
       if (Math.abs(x - STATION.x) < 26 && Math.abs(z - STATION.z) < 56) return false
+      if (districtAt(x, z)) return false
+      if (Math.abs(x - HIGHWAY.x) < 40 && z > HIGHWAY.z0 - 30 && z < HIGHWAY.z1 + 30) return false
       const town = inTown(x, z, 5)
       if (town && !inBlockMiddle(x, z)) return false
       return !plots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)
@@ -307,12 +320,12 @@ export class World {
         }
       }
     }
-    trees1.push(...avenue)
+    trees1.push(...avenue, ...this.town.districts.trees)
     if (tree1 && tree2) {
       this.forest = new Forest(this.renderer, this.scene.environment, [tree1, tree2], [
         ...trees1.map((matrix) => ({ model: 0, matrix })),
         ...trees2.map((matrix) => ({ model: 1, matrix })),
-      ])
+      ], this.quality.tier === 'high' ? 45 : this.quality.tier === 'mid' ? 28 : -1)
       this.group.add(this.forest.group)
     }
     for (const m of [...trees1, ...trees2]) {

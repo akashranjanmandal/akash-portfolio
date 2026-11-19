@@ -85,4 +85,18 @@ export const SIGHTS = [
   { id: 'howrah', label: 'Howrah Bridge', sub: 'Across the Hooghly', x: -232, z: 9 },
   { id: 'station', label: 'Howrah Station', sub: 'The other bank', x: -355, z: 0 },
   { id: 'memorial', label: 'Victoria Memorial', sub: 'White marble, since 1921', x: 0, z: -250 },
+  { id: 'sarobar', label: 'Rabindra Sarobar', sub: 'Lakeside promenade', x: 250, z: 50 },
+  { id: 'minar', label: 'Shaheed Minar Plaza', sub: 'Pedestrian esplanade', x: 250, z: -50 },
+  { id: 'bypass', label: 'Eastern Bypass', sub: 'The highway', x: 450, z: 100 },
 ]
+
+/** the Eastern Bypass: a divided highway running north-south beyond the east edge of the grid */
+export const HIGHWAY = { x: 450, z0: -205, z1: 415, w: 31 }
+
+/** special blocks that are not lined with shop-houses (block centres on the grid) */
+export type DistrictKind = 'lake' | 'plaza'
+export const DISTRICTS: { id: string; kind: DistrictKind; cx: number; cz: number; label: string; sub: string }[] = [
+  { id: 'sarobar', kind: 'lake', cx: 250, cz: 50, label: 'Rabindra Sarobar', sub: 'Lakeside promenade' },
+  { id: 'minar', kind: 'plaza', cx: 250, cz: -50, label: 'Shaheed Minar Plaza', sub: 'Pedestrian esplanade' },
+]
+export const districtAt = (x: number, z: number) => DISTRICTS.find((d) => Math.abs(x - d.cx) < 50 && Math.abs(z - d.cz) < 50)

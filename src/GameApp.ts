@@ -8,7 +8,7 @@ import { Toasts } from './ui/Toasts'
 import { AudioEngine } from './audio/AudioEngine'
 import { ICONS, storage } from './utils/dom'
 import { hasWebGL, isTouch } from './utils/device'
-import { PLOTS, GRID } from './game/city/Plan'
+import { PLOTS, GRID, HIGHWAY, DISTRICTS } from './game/city/Plan'
 import type { Spot } from './game/city/Landmarks'
 
 const $ = (id: string) => document.getElementById(id)!
@@ -286,7 +286,7 @@ export class GameApp {
     const g = bg.getContext('2d')!
     g.fillStyle = '#35553f'
     g.fillRect(0, 0, S, S)
-    const span = 1100
+    const span = 1200
     const P = (v: number) => ((v + span / 2) / span) * S
     g.fillStyle = '#4f6d7a'
     g.fillRect(P(-312), 0, P(-232) - P(-312), S)
@@ -295,6 +295,17 @@ export class GameApp {
       g.fillRect(P(v - 5), P(GRID[0] - 5), P(v + 5) - P(v - 5), P(GRID[GRID.length - 1] + 5) - P(GRID[0] - 5))
       g.fillRect(P(GRID[0] - 5), P(v - 5), P(GRID[GRID.length - 1] + 5) - P(GRID[0] - 5), P(v + 5) - P(v - 5))
     }
+    g.fillStyle = '#9a958a'
+    g.fillRect(P(HIGHWAY.x - HIGHWAY.w / 2), P(HIGHWAY.z0), P(HIGHWAY.x + HIGHWAY.w / 2) - P(HIGHWAY.x - HIGHWAY.w / 2), P(HIGHWAY.z1) - P(HIGHWAY.z0))
+    for (const d of DISTRICTS) {
+      g.fillStyle = d.kind === 'lake' ? '#4f86a0' : '#b9ad94'
+      if (d.kind === 'lake') {
+        g.beginPath()
+        g.ellipse(P(d.cx), P(d.cz), P(23) - P(0), P(15) - P(0), 0, 0, Math.PI * 2)
+        g.fill()
+      } else g.fillRect(P(d.cx - 41), P(d.cz - 41), P(41) - P(-41), P(41) - P(-41))
+    }
+    g.fillStyle = '#d8d2c6'
     g.fillRect(P(-400), P(-5), P(GRID[0] - 5) - P(-400), P(5) - P(-5))
     g.fillRect(P(-5), P(-330), P(5) - P(-5), P(GRID[0] - 5) - P(-330))
     this.mapBg = bg
@@ -304,7 +315,7 @@ export class GameApp {
     const c = this.mapCtx
     const W = c.canvas.width
     if (!this.mapBg) return
-    const span = 1100
+    const span = 1200
     const zoom = 2.2
     c.save()
     c.clearRect(0, 0, W, W)

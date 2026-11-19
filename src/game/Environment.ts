@@ -100,6 +100,18 @@ export class Environment {
       fragmentShader: `
         uniform sampler2D map; uniform float uAmount; uniform float uExposure;
         varying vec3 vObj; varying vec3 vWorld;
+        float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+        vec3 procStars(vec3 d) {
+          vec3 p = d * 120.0;
+          vec3 id = floor(p);
+          vec3 f = fract(p);
+          float h = hash13(id);
+          if (h < 0.5) return vec3(0.0);
+          vec3 off = vec3(hash13(id + 1.7), hash13(id + 3.1), hash13(id + 5.3));
+          float dd = length(f - off);
+          float b = smoothstep(0.2, 0.0, dd) * pow(hash13(id + 9.0), 3.0) * 1.4;
+          return vec3(b) * mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.9, 0.75), hash13(id + 11.0));
+        }
         void main() {
           // direction in the celestial frame -> right ascension / declination -> star map
           float dec = asin(clamp(vObj.y, -1.0, 1.0));
@@ -111,6 +123,10 @@ export class Environment {
           vec3 c = vec3(0.0);
           for (int k = 0; k < 8; k++) c += texture2D(map, vec2(u + ((float(k) + 0.5) / 8.0 - 0.5) * du, v)).rgb;
           c /= 8.0;
+          // the map is smeared into streaks at the celestial pole: swap that cap for round procedural stars
+          float cap = smoothstep(0.974, 0.988, abs(vObj.y));
+          vec3 filler = vec3(0.016) + procStars(vObj) + procStars(vObj * 1.7 + 3.0) * 0.7;
+          c = mix(c, filler, cap);
           // a little contrast: deep dark background, bright band and stars
           c = pow(c, vec3(1.32));
           // thicker air near the horizon dims everything

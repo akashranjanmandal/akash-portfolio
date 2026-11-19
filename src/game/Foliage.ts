@@ -4,8 +4,8 @@ import * as THREE from 'three'
    away. The impostor texture is rendered from the real model at load
    time (4 views around the tree), so both LODs match. */
 
-const CHUNK = 80
-const NEAR = 95 // metres: full mesh inside, impostor outside
+const CHUNK = 60
+/** metres from a chunk's edge within which trees are full meshes (impostor billboards beyond) */
 
 type Chunk = { cx: number; cz: number; near: THREE.InstancedMesh[]; far: THREE.InstancedMesh }
 
@@ -119,7 +119,7 @@ export class Forest {
   private chunks: Chunk[] = []
   private lastCell = ''
 
-  constructor(renderer: THREE.WebGLRenderer, env: THREE.Texture | null, models: THREE.Object3D[], placements: { model: number; matrix: THREE.Matrix4 }[]) {
+  constructor(renderer: THREE.WebGLRenderer, env: THREE.Texture | null, models: THREE.Object3D[], placements: { model: number; matrix: THREE.Matrix4 }[], private near = 45) {
     const baked = models.map((m) => {
       prepareFoliage(m)
       m.updateMatrixWorld(true)
@@ -185,7 +185,7 @@ export class Forest {
       const x = (c.cx + 0.5) * CHUNK
       const z = (c.cz + 0.5) * CHUNK
       const d = Math.hypot(x - player.x, z - player.z) - CHUNK * 0.7
-      const near = d < NEAR
+      const near = d < this.near
       for (const m of c.near) m.visible = near
       for (const m of c.far.userData.all as THREE.InstancedMesh[]) m.visible = !near
     }

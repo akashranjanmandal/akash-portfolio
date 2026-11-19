@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { RAPIER, type Physics } from './Physics'
 import { ambassador, type Ambassador } from './Ambassador'
-import { GRID, ROAD_W } from './city/Plan'
+import { GRID, ROAD_W, HIGHWAY } from './city/Plan'
 import { rng } from '../utils/math'
 
 /* ──────────────────────────────────────────────────────────────
@@ -23,6 +23,8 @@ type Driver = {
   s: number
   speed: number
   stuck: number
+  /** cruising speed in m/s */
+  cruise: number
 }
 
 /** a rounded rectangle loop through four junctions, driven anticlockwise on the left lane */
@@ -57,6 +59,25 @@ function loopPath(x0: number, z0: number, x1: number, z1: number) {
       const q = p0.clone().multiplyScalar((1 - t) ** 2).add(ctrl.clone().multiplyScalar(2 * t * (1 - t))).add(p2.clone().multiplyScalar(t * t))
       pts.push(new THREE.Vector3(q.x, 0, q.y))
     }
+  }
+  return pts
+}
+
+/** a long loop down the southbound (east) carriageway, round the end, and back up the northbound one */
+function highwayPath() {
+  const { x, z0, z1 } = HIGHWAY
+  const off = 6.2
+  const pts: THREE.Vector3[] = []
+  // left-hand traffic: heading south (+z) the left side is east
+  for (let z = z0 + 12; z < z1 - 12; z += 3) pts.push(new THREE.Vector3(x + off, 0, z))
+  for (let k = 0; k <= 12; k++) {
+    const t = (k / 12) * Math.PI
+    pts.push(new THREE.Vector3(x + Math.cos(t) * off, 0, z1 - 12 + Math.sin(t) * off))
+  }
+  for (let z = z1 - 12; z > z0 + 12; z -= 3) pts.push(new THREE.Vector3(x - off, 0, z))
+  for (let k = 0; k <= 12; k++) {
+    const t = (k / 12) * Math.PI
+    pts.push(new THREE.Vector3(x - Math.cos(t) * off, 0, z0 + 12 - Math.sin(t) * off))
   }
   return pts
 }
@@ -101,7 +122,24 @@ export class Traffic {
       const body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased())
       physics.world.createCollider(RAPIER.ColliderDesc.cuboid(0.85, 0.7, 2.2).setTranslation(0, 0.8, 0), body)
       const length = dist[path.length]
-      this.drivers.push({ car, body, path, dist, length, s: r() * length, speed: CRUISE * r(), stuck: 0 })
+      this.drivers.push({ car, body, path, dist, length, s: r() * length, speed: CRUISE * r(), stuck: 0, cruise: CRUISE })
+    }
+    // the bypass: fewer cars, a lot faster
+    const hw = highwayPath()
+    const hdist = [0]
+    for (let k = 1; k <= hw.length; k++) hdist.push(hdist[k - 1] + hw[k - 1].distanceTo(hw[k % hw.length]))
+    const hn = count > 8 ? 6 : 3
+    for (let i = 0; i < hn; i++) {
+      const car = ambassador()
+      this.group.add(car.model)
+      const pool = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 9).rotateX(-Math.PI / 2), this.poolMat)
+      pool.position.set(0, 0.05, -6.6)
+      pool.renderOrder = 1
+      car.model.add(pool)
+      const body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased())
+      physics.world.createCollider(RAPIER.ColliderDesc.cuboid(0.85, 0.7, 2.2).setTranslation(0, 0.8, 0), body)
+      const length = hdist[hw.length]
+      this.drivers.push({ car, body, path: hw, dist: hdist, length, s: (i / hn) * length + r() * 40, speed: 16, stuck: 0, cruise: 16 + r() * 5 })
     }
   }
 
@@ -148,10 +186,11 @@ export class Traffic {
         const side = Math.abs(rel.x * fwd.z - rel.z * fwd.x)
         if (along > 1.5 && along < range && side < 2.4) block = true
       }
-      check(player, 9)
-      for (const o of others) check(o, 9)
-      if (d.stuck < 3) for (const e of this.drivers) if (e !== d) check(e.car.model.position, 8)
-      const target = block ? 0 : CRUISE
+      const look = 6 + d.cruise * 0.6
+      check(player, look)
+      for (const o of others) check(o, look)
+      if (d.stuck < 3) for (const e of this.drivers) if (e !== d) check(e.car.model.position, look - 1)
+      const target = block ? 0 : d.cruise
       d.speed += (target - d.speed) * Math.min(1, dt * (block ? 4 : 0.8))
       d.stuck = block && d.speed < 0.3 ? d.stuck + dt : 0
       if (d.stuck > 6) d.stuck = 0

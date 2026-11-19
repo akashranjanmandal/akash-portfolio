@@ -1,4 +1,4 @@
-import { GRID } from '../game/city/Plan'
+import { GRID, HIGHWAY, DISTRICTS } from '../game/city/Plan'
 import { ICONS, escapeHtml } from '../utils/dom'
 import { trapFocus } from './focus'
 
@@ -14,8 +14,8 @@ export type MapState = {
 }
 
 // the view covers the river, the station on the far bank, the town and the memorial to the north
-const SPAN = 880
-const CX = 10
+const SPAN = 960
+const CX = 40
 const CZ = 35
 
 export class WorldMap {
@@ -139,6 +139,22 @@ export class WorldMap {
     }
     c.fillRect(PX(-400), PZ(-5), (GRID[0] - 5 + 400) * k, 10 * k)
     c.fillRect(PX(-5), PZ(-330), 10 * k, (GRID[0] - 5 + 330) * k)
+    // the bypass, lakes and plazas
+    c.fillStyle = '#8f8a80'
+    c.fillRect(PX(HIGHWAY.x - HIGHWAY.w / 2), PZ(HIGHWAY.z0), HIGHWAY.w * k, (HIGHWAY.z1 - HIGHWAY.z0) * k)
+    c.fillStyle = '#4a4742'
+    c.fillRect(PX(HIGHWAY.x - 1.5), PZ(HIGHWAY.z0), 3 * k, (HIGHWAY.z1 - HIGHWAY.z0) * k)
+    for (const d of DISTRICTS) {
+      if (d.kind === 'lake') {
+        c.fillStyle = '#4f86a0'
+        c.beginPath()
+        c.ellipse(PX(d.cx), PZ(d.cz), 23 * k, 15 * k, 0, 0, Math.PI * 2)
+        c.fill()
+      } else {
+        c.fillStyle = '#b9ad94'
+        c.fillRect(PX(d.cx - 41), PZ(d.cz - 41), 82 * k, 82 * k)
+      }
+    }
     // bridge
     c.fillStyle = '#8a8478'
     c.fillRect(PX(-318), PZ(-6), 92 * k, 12 * k)
