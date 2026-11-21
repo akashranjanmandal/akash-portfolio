@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { RAPIER, type Physics } from './Physics'
 import { ambassador, type Ambassador } from './Ambassador'
 import { GRID, ROAD_W, HIGHWAY } from './city/Plan'
+import { flyoverLoop } from './city/Flyover'
 import { rng } from '../utils/math'
 
 /* ──────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ function highwayPath() {
 
 export class Traffic {
   readonly group = new THREE.Group()
-  private drivers: Driver[] = []
+  drivers: Driver[] = []
   private parked: Ambassador[] = []
   private readonly tmp = new THREE.Vector3()
   private poolMat = (() => {
@@ -141,6 +142,22 @@ export class Traffic {
       const length = hdist[hw.length]
       this.drivers.push({ car, body, path: hw, dist: hdist, length, s: (i / hn) * length + r() * 40, speed: 16, stuck: 0, cruise: 16 + r() * 5 })
     }
+    // the flyover: a couple of cars going up to the viewing platform and back
+    const fl = flyoverLoop()
+    const fdist = [0]
+    for (let k = 1; k <= fl.length; k++) fdist.push(fdist[k - 1] + fl[k - 1].distanceTo(fl[k % fl.length]))
+    for (let i = 0; i < 2; i++) {
+      const car = ambassador()
+      this.group.add(car.model)
+      const pool = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 9).rotateX(-Math.PI / 2), this.poolMat)
+      pool.position.set(0, 0.05, -6.6)
+      pool.renderOrder = 1
+      car.model.add(pool)
+      const body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased())
+      physics.world.createCollider(RAPIER.ColliderDesc.cuboid(0.85, 0.7, 2.2).setTranslation(0, 0.8, 0), body)
+      const length = fdist[fl.length]
+      this.drivers.push({ car, body, path: fl, dist: fdist, length, s: (i / 2) * length, speed: 8, stuck: 0, cruise: 10 })
+    }
   }
 
   /** parked Ambassadors along the kerbs */
@@ -180,6 +197,8 @@ export class Traffic {
       // is anything in the lane just ahead?
       let block = false
       const check = (p: THREE.Vector3, range: number) => {
+        // something on another level (a car on the flyover above the Bypass) is not in the way
+        if (Math.abs(p.y - pos.y) > 3) return
         const rel = this.tmp.copy(p).sub(pos)
         rel.y = 0
         const along = rel.dot(fwd)
@@ -196,10 +215,11 @@ export class Traffic {
       if (d.stuck > 6) d.stuck = 0
       d.s += d.speed * dt
       this.sample(d, d.s, pos)
-      d.car.model.position.copy(pos).setY(0.02)
-      // model nose is -Z
-      d.car.model.rotation.y = Math.atan2(-fwd.x, -fwd.z)
-      d.body.setNextKinematicTranslation({ x: pos.x, y: 0, z: pos.z })
+      d.car.model.position.copy(pos).setY(pos.y + 0.02)
+      // model nose is -Z; on a ramp the car pitches with the road
+      const pitch = Math.atan2(ahead.y - pos.y, Math.hypot(ahead.x - pos.x, ahead.z - pos.z) || 1)
+      d.car.model.rotation.set(pitch, Math.atan2(-fwd.x, -fwd.z), 0, 'YXZ')
+      d.body.setNextKinematicTranslation({ x: pos.x, y: pos.y, z: pos.z })
       d.body.setNextKinematicRotation(new THREE.Quaternion().setFromEuler(d.car.model.rotation))
       const spin = (d.speed * dt) / 0.45
       for (const n of ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']) {

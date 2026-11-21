@@ -44,6 +44,13 @@ function groundAt(x: number, z: number) {
     const t = Math.min(1, Math.max(0, (hz - 24) / 14))
     return -0.08 * (1 - t) + g * t
   }
+  // the flyover's east end and its platform stand on a levelled pad beside the Bypass
+  if (x > 400 && x < 560 && z > -340 && z < -230) {
+    const fd = Math.hypot(Math.max(0, x - 512), z + 285) + Math.max(0, 420 - x)
+    const t = Math.min(1, Math.max(0, (Math.abs(z + 285) + Math.max(0, x - 512) - 26) / 22))
+    void fd
+    return -0.08 * (1 - t) + g * t
+  }
   // the suburban railway south of the grid sits on a flat strip too
   if (x > -215 && x < 435) {
     const rz = Math.abs(z - 459)
@@ -307,6 +314,9 @@ export class World {
       if (x < -200 && Math.abs(z) < 12) return false
       if (Math.abs(x - STATION.x) < 26 && Math.abs(z - STATION.z) < 56) return false
       if (districtAt(x, z)) return false
+      // nothing grows on the flyover's line
+      if (z > -305 && z < -265 && x > 190 && x < 545) return false
+      if (x > 185 && x < 250 && z > -300 && z < -200) return false
       if (Math.abs(x - HIGHWAY.x) < 90 && z > HIGHWAY.z0 - 120 && z < HIGHWAY.z1 + 30) return false
       const town = inTown(x, z, 5)
       if (town && !inBlockMiddle(x, z)) return false

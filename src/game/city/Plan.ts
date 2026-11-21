@@ -91,6 +91,7 @@ export const SIGHTS = [
   { id: 'eden', label: 'Eden Gardens', sub: 'The cricket cathedral', x: 150, z: 250 },
   { id: 'sealdah', label: 'Sealdah terminal', sub: 'Suburban trains · level crossing', x: 135, z: 436 },
   { id: 'esplanade', label: 'Esplanade metro', sub: 'Kolkata Metro, on the viaduct', x: 0, z: 100 },
+  { id: 'flyover', label: 'Viewing flyover', sub: 'Over the Bypass · Kolkata from above', x: 512, z: -285 },
 ]
 
 /** the Eastern Bypass: a divided highway running north-south beyond the east edge of the grid */

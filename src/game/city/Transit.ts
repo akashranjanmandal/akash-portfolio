@@ -4,6 +4,7 @@ import { Batch, M } from './Batch'
 import { townBuilding, type Materials } from './Town'
 import { labelTexture } from '../hills/Portal'
 import { rng } from '../../utils/math'
+import { FLY, flyoverPath } from './Flyover'
 
 /* ──────────────────────────────────────────────────────────────
    RAILWAYS
@@ -20,7 +21,7 @@ export const RAIL = { z1: 456, z2: 462, x0: -190, x1: 410, platformX: [40, 230] 
 type Glow = { mat: THREE.MeshStandardMaterial; day: number; night: number }
 
 /** a long strip along a polyline: the cross-section (lateral offset, height) is swept down the path */
-function sweep(path: THREE.Vector3[], section: [number, number][], closed = true) {
+export function sweep(path: THREE.Vector3[], section: [number, number][], closed = true) {
   const pos: number[] = []
   const uv: number[] = []
   const idx: number[] = []
@@ -98,6 +99,7 @@ export class Transit {
     const b = new Batch()
     this.metro(b)
     this.railway(b)
+    this.flyover(b)
     b.build(this.group)
     this.trains.push(this.makeTrain(3, 17, 'metro'))
     this.trains[0].z = METRO.z + 2.1
@@ -281,6 +283,94 @@ export class Transit {
       this.group.add(pivot)
       this.arms.push({ pivot, angle: 1.35 })
       void dir
+    }
+  }
+
+
+  /* ── the flyover ──────────────────────────────────────────── */
+
+  private flyover(b: Batch) {
+    const { m, physics } = this
+    const path = flyoverPath()
+    const W = FLY.width
+    // the structure: a concrete girder with parapets; the driving surface is asphalt laid on top
+    const deck = new THREE.Mesh(
+      sweep(path, [[-W / 2 - 0.4, -1.6], [-W / 2 - 0.4, 0.95], [-W / 2, 0.95], [-W / 2, 0], [W / 2, 0], [W / 2, 0.95], [W / 2 + 0.4, 0.95], [W / 2 + 0.4, -1.6]]),
+      (m.concrete as THREE.MeshStandardMaterial).clone(),
+    )
+    ;(deck.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide
+    deck.castShadow = deck.receiveShadow = true
+    this.group.add(deck)
+    deck.updateMatrixWorld(true)
+    physics.fixedMesh(deck)
+    const surface = new THREE.Mesh(sweep(path.map((p) => p.clone().setY(p.y + 0.03)), [[-W / 2, 0], [W / 2, 0]], false), m.asphalt)
+    surface.receiveShadow = true
+    this.group.add(surface)
+    // lane markings on the surface
+    for (let i = 0; i < path.length - 1; i += 2) {
+      const p = path[i]
+      const q = path[i + 1]
+      const yaw = Math.atan2(q.x - p.x, q.z - p.z)
+      b.box(0.15, 0.02, 2.4, m.line, M((p.x + q.x) / 2, (p.y + q.y) / 2 + 0.07, (p.z + q.z) / 2, yaw), 1)
+    }
+    // piers every 24 m where the deck is off the ground, clear of the Bypass carriageways
+    const hw = new THREE.MeshStandardMaterial({ color: '#fff6e0', emissive: '#ffd79a', emissiveIntensity: 0.2 })
+    this.glow.push({ mat: hw, day: 0.2, night: 5 })
+    let next = 0
+    path.forEach((p, i) => {
+      if (i < next) return
+      next = i + 6
+      if (p.y > 1.6) {
+        const inLanes = Math.abs(p.x - 450) > 7 && Math.abs(p.x - 450) < 18
+        if (!inLanes) {
+          b.box(1.9, p.y - 1.6, 1.9, m.concrete, M(p.x, (p.y - 1.6) / 2, p.z), 2)
+          b.box(W - 1, 0.9, 2.6, m.concrete, M(p.x, p.y - 2, p.z), 2)
+          physics.fixedBox(p.x, (p.y - 1.6) / 2, p.z, 0.95, (p.y - 1.6) / 2, 0.95)
+        }
+      }
+      if (i % 5 === 0 && p.y > -1) for (const s of [-1, 1]) {
+        const q = path[Math.min(path.length - 1, i + 1)]
+        const yaw = Math.atan2(q.x - p.x, q.z - p.z)
+        const lx = p.x + Math.cos(yaw) * s * (W / 2 + 0.2)
+        const lz = p.z - Math.sin(yaw) * s * (W / 2 + 0.2)
+        b.box(0.14, 2.6, 0.14, m.frame, M(lx, p.y + 1.3, lz), 1)
+        b.add(new THREE.SphereGeometry(0.22, 10, 8), hw, M(lx, p.y + 2.7, lz))
+      }
+    })
+    // the platform: a round deck on a thick column, a parapet with a gap for the road, a sign
+    const px = FLY.plat.x
+    const r = FLY.plat.r
+    const y = FLY.y
+    b.add(new THREE.CylinderGeometry(r + 0.4, r + 0.4, 1.6, 40), m.concrete, M(px, y - 0.8, FLY.z))
+    const top = new THREE.Mesh(new THREE.CircleGeometry(r, 40).rotateX(-Math.PI / 2), m.asphalt)
+    top.position.set(px, y + 0.03, FLY.z)
+    this.group.add(top)
+    physics.fixedCylinder(px, y - 0.8, FLY.z, r + 0.4, 1.6)
+    for (const dx of [-8, 8]) for (const dz of [-8, 8]) {
+      b.box(2, y - 1.6, 2, m.concrete, M(px + dx, (y - 1.6) / 2, FLY.z + dz), 2)
+      physics.fixedBox(px + dx, (y - 1.6) / 2, FLY.z + dz, 1, (y - 1.6) / 2, 1)
+    }
+    const SEG = 28
+    for (let i = 0; i < SEG; i++) {
+      const a0 = (i / SEG) * Math.PI * 2
+      const a1 = ((i + 1) / SEG) * Math.PI * 2
+      const am = (a0 + a1) / 2
+      if (Math.abs(Math.cos(am) + 1) < 0.16 || Math.abs(am - Math.PI) < 0.22) continue // the entrance, on the west side
+      const x = px + Math.cos(am) * r
+      const z = FLY.z + Math.sin(am) * r
+      const len = 2 * r * Math.sin(Math.PI / SEG)
+      const yaw = Math.atan2(-Math.cos(am), -Math.sin(am))
+      b.box(len + 0.05, 1.0, 0.4, m.concrete, M(x, y + 0.5, z, yaw), 2)
+      physics.fixedBox(x, y + 0.5, z, (len + 0.05) / 2, 0.5, 0.2, yaw)
+    }
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.2), new THREE.MeshStandardMaterial({ map: labelTexture(['VIEWING FLYOVER', 'Kolkata from above'], '#0e3b2e', '#ffffff', 1024, 256), roughness: 0.6 }))
+    sign.position.set(px + r - 0.3, y + 1.9, FLY.z)
+    sign.rotation.y = -Math.PI / 2
+    this.group.add(sign)
+    // a few benches at the rail
+    for (const k of [-6, 0, 6]) {
+      b.box(0.5, 0.07, 1.7, m.wood, M(px + r - 1.4, y + 0.48, FLY.z + k), 1)
+      physics.fixedBox(px + r - 1.4, y + 0.45, FLY.z + k, 0.3, 0.4, 0.85)
     }
   }
 
