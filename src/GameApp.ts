@@ -103,7 +103,11 @@ export class GameApp {
     this.worldMap = new WorldMap(() => ({
       spots: (g.region === 'hills' ? g.hills.spots : g.world.landmarks.spots).map((s) => ({ id: s.id, title: s.title, sub: s.sub, x: s.pos.x, z: s.pos.z })),
       hills: g.region === 'hills' && g.hills.mapImage() ? { bg: g.hills.mapImage()!, x0: HB.x0, z0: HILLS_Z + HB.z0, w: HB.x1 - HB.x0, h: HB.z1 - HB.z0 } : undefined,
-      player: { x: g.player.position.x, z: g.player.position.z, yaw: g.player.yaw },
+      // where you actually are: the vehicle when driving (the player is parked inside it), and the way you face
+      player: (() => {
+        const v = g.player.vehicle
+        return v ? { x: v.position.x, z: v.position.z, yaw: v.yaw + Math.PI } : { x: g.player.position.x, z: g.player.position.z, yaw: g.player.yaw }
+      })(),
       vehicles: g.vehicles.map((v) => ({ kind: v.kind, x: v.position.x, z: v.position.z })),
       waypoint: this.waypoint?.id ?? null,
       visited: this.visited,

@@ -213,7 +213,7 @@ function shopInterior() {
 }
 
 /** a mid-rise town building with windows, cornices, a parapet and roof clutter */
-export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: number, w: number, d: number, floors: number, wall: THREE.Material, r: () => number, opts: { shop?: boolean; fairy?: FairyBuffer } = {}) {
+export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: number, w: number, d: number, floors: number, wall: THREE.Material, r: () => number, opts: { shop?: boolean; fairy?: FairyBuffer; /** false: only the street face is detailed (rows of buildings hide their sides and backs) */ sides?: boolean } = {}) {
   const h = floors * FLOOR + 0.4
   const base = M(x, 0, z, yaw)
   const at = (lx: number, ly: number, lz: number, ryaw = 0) => base.clone().multiply(M(lx, ly, lz, ryaw))
@@ -231,12 +231,13 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
   b.box(0.25, 0.9, d, m.trim, at(-w / 2, h + 0.45, 0))
   b.box(w - 0.2, 0.05, d - 0.2, m.roof, at(0, h + 0.03, 0), 3)
   // windows on all four faces
-  const faces: [number, number, number, number][] = [
+  const allFaces: [number, number, number, number][] = [
     [0, d / 2, 0, w],
     [0, -d / 2, Math.PI, w],
     [w / 2, 0, Math.PI / 2, d],
     [-w / 2, 0, -Math.PI / 2, d],
   ]
+  const faces = opts.sides === false ? allFaces.slice(0, 1) : allFaces
   const green = r() < 0.7
   const balconies = r() < 0.6
   const arched = r() < 0.45
@@ -435,7 +436,7 @@ export class Town {
             if (Math.abs(along) > BLOCK_HALF - 9 - w / 2) continue
             const floors = 2 + Math.floor(r() * 4)
             const wall = r() < 0.2 ? m.brick : r() < 0.15 ? m.concrete : m.plaster[Math.floor(r() * m.plaster.length)]
-            townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.55, fairy: this.fairyBuf })
+            townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.55, fairy: this.fairyBuf, sides: false })
             this.physics.fixedBox(ox, (floors * FLOOR) / 2, oz, (fz !== 0 ? w : d) / 2, (floors * FLOOR) / 2, (fz !== 0 ? d : w) / 2)
             occupied.push({ x: ox, z: oz, r: Math.max(w, d) / 2 })
           }

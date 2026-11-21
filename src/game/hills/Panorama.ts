@@ -126,9 +126,6 @@ export class Panorama {
     const layers: Layer[] = [
       // the great range: 130 km away, drawn tall
       { R: 3700, tint: '#4e5a70', snowLine: 900, haze: 0.14, detail: 1.0, top: (az) => 330 + profile(az) * 0.09, scale: 1 },
-      // dark foothills and ridges nearer
-      { R: 3000, tint: '#2c3a4c', snowLine: 9999, haze: 0.42, detail: 1.6, top: (az) => 250 + 150 * noise2(az * 0.12 + 4, 1.7) + 60 * noise2(az * 0.5, 9), scale: 1 },
-      { R: 2300, tint: '#25402f', snowLine: 9999, haze: 0.3, detail: 2.2, top: (az) => 120 + 140 * noise2(az * 0.1 + 11, 5.1) + 40 * noise2(az * 0.6 + 2, 8), scale: 1 },
     ]
     layers.forEach((l, li) => {
       const N = 720

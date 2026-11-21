@@ -305,11 +305,14 @@ function plaza(c: Ctx, cx: number, cz: number) {
 
 function stadium(c: Ctx, cx: number, cz: number) {
   const { b, m, group, out } = c
-  const RX = 25 // the playing field's radii
-  const RZ = 22
+  const RX = 26 // the playing field's radii
+  const RZ = 21
+  const ROWS = 22
+  const rise = 0.5
+  const run = 0.55
   b.box(2 * HALF, 0.03, 2 * HALF, m.paving, M(cx, CURB + 0.02, cz), 3)
 
-  // the outfield: mown in broad stripes
+  // the outfield, mown in broad stripes, with a rope, a 30-yard circle, the pitch and creases
   const cv = document.createElement('canvas')
   cv.width = 64
   cv.height = 8
@@ -326,99 +329,175 @@ function stadium(c: Ctx, cx: number, cz: number) {
   fieldGeo.translate(cx, CURB + 0.07, cz)
   planar(fieldGeo, 6)
   group.add(Object.assign(new THREE.Mesh(fieldGeo, new THREE.MeshStandardMaterial({ map: stripe, roughness: 0.95 })), { receiveShadow: true }))
-  // boundary rope and the pitch with its creases and stumps
-  const rope = new THREE.RingGeometry(0.992, 1.0, 72).rotateX(-Math.PI / 2)
-  rope.scale(RX, 1, RZ)
-  rope.translate(cx, CURB + 0.1, cz)
-  group.add(new THREE.Mesh(rope, new THREE.MeshBasicMaterial({ color: '#f4f4ee' })))
+  const ringLine = (rxs: number, rzs: number, y: number, w: number, color: string) => {
+    const r = new THREE.RingGeometry(1 - w, 1, 72).rotateX(-Math.PI / 2)
+    r.scale(rxs, 1, rzs)
+    r.translate(cx, CURB + y, cz)
+    group.add(new THREE.Mesh(r, new THREE.MeshBasicMaterial({ color })))
+  }
+  ringLine(RX, RZ, 0.1, 0.006, '#f4f4ee')
+  ringLine(15, 12.5, 0.09, 0.008, '#e8ecdc')
   const clay = new THREE.MeshStandardMaterial({ color: '#c9b27c', roughness: 1 })
   b.box(20.1, 0.02, 3.05, clay, M(cx, CURB + 0.1, cz), 4)
   for (const s of [-1, 1]) {
-    for (const dz of [-1.3, 0, 1.3]) b.box(3.5, 0.015, 0.05, m.line, M(cx + s * 8.6, CURB + 0.115, cz + dz * 0.0 + (dz === 0 ? 0 : 0)), 1)
+    b.box(3.5, 0.015, 0.05, m.line, M(cx + s * 8.6, CURB + 0.115, cz + 1.3), 1)
+    b.box(3.5, 0.015, 0.05, m.line, M(cx + s * 8.6, CURB + 0.115, cz - 1.3), 1)
     b.box(0.05, 0.015, 2.64, m.line, M(cx + s * 8.6, CURB + 0.115, cz), 1)
     b.box(0.05, 0.015, 2.64, m.line, M(cx + s * 10.05, CURB + 0.115, cz), 1)
     for (const dz of [-0.11, 0, 0.11]) b.box(0.04, 0.7, 0.04, m.wood, M(cx + s * 10.05, CURB + 0.45, cz + dz), 1)
   }
+  // advertising boards round the rope
+  const adColors = ['#1d4fa8', '#d62b2b', '#f2f2f2', '#f2b705', '#1c8c4e', '#7a2fb0']
+  const AD = 44
+  for (let i = 0; i < AD; i++) {
+    const a0 = (i / AD) * Math.PI * 2
+    const a1 = ((i + 1) / AD) * Math.PI * 2
+    const am = (a0 + a1) / 2
+    const rr = 1.012
+    const x = cx + Math.cos(am) * RX * rr
+    const z = cz + Math.sin(am) * RZ * rr
+    const len = Math.hypot((Math.cos(a1) - Math.cos(a0)) * RX, (Math.sin(a1) - Math.sin(a0)) * RZ)
+    const yaw = Math.atan2(-(Math.sin(a1) - Math.sin(a0)) * RZ, (Math.cos(a1) - Math.cos(a0)) * RX)
+    b.box(len + 0.05, 0.9, 0.14, new THREE.MeshStandardMaterial({ color: adColors[i % adColors.length], roughness: 0.6 }), M(x, CURB + 0.5, z, yaw), 1)
+  }
 
-  // the stands: ten stepped tiers, blue and white, broken at east and west for the gates
-  const SEC = 44
-  const T = 10
-  const rise = 0.55
+  // the bowl: 22 stepped rows. Seats alternate blue and white with a yellow band; gaps at north and south are the gates,
+  // the west end makes room for the pavilion and the east end for the sightscreen
   const blue = new THREE.MeshStandardMaterial({ color: '#1d4fa8', roughness: 0.8 })
-  const white = new THREE.MeshStandardMaterial({ color: '#e6eaf2', roughness: 0.8 })
+  const white = new THREE.MeshStandardMaterial({ color: '#e8ecf4', roughness: 0.8 })
   const yellow = new THREE.MeshStandardMaterial({ color: '#f2b705', roughness: 0.8 })
-  const rx = (t: number) => RX + 2 + t * 1.0
-  const rz = (t: number) => RZ + 2 + t * 0.95
-  for (let t = 0; t < T; t++) {
-    const mat = t % 4 === 3 ? yellow : t % 2 ? white : blue
+  const rx = (t: number) => RX + 2.2 + t * run
+  const rz = (t: number) => RZ + 2.2 + t * run * 0.9
+  const SEC = 56
+  const gate = (am: number) => Math.abs(Math.cos(am)) < 0.1
+  const west = (am: number) => Math.abs(am - Math.PI) < 0.42
+  const east = (am: number) => Math.abs(am < Math.PI ? am : am - Math.PI * 2) < 0.2
+  for (let t = 0; t < ROWS; t++) {
     const h = (t + 1) * rise
+    const band = t % 7 === 6 ? yellow : null
     for (let i = 0; i < SEC; i++) {
       const a0 = (i / SEC) * Math.PI * 2
       const a1 = ((i + 1) / SEC) * Math.PI * 2
       const am = (a0 + a1) / 2
-      if (Math.abs(Math.sin(am)) < 0.17) continue // the gates
-      const rxm = rx(t) + 0.5
-      const rzm = rz(t) + 0.475
+      if (gate(am) || (west(am) && t < 15) || (east(am) && t < 7)) continue
+      const rxm = rx(t) + run / 2
+      const rzm = rz(t) + run * 0.45
       const x = cx + Math.cos(am) * rxm
       const z = cz + Math.sin(am) * rzm
-      const dx = Math.cos(a1) * rxm - Math.cos(a0) * rxm
-      const dz = Math.sin(a1) * rzm - Math.sin(a0) * rzm
+      const dx = (Math.cos(a1) - Math.cos(a0)) * rxm
+      const dz = (Math.sin(a1) - Math.sin(a0)) * rzm
       const len = Math.hypot(dx, dz)
       const yaw = Math.atan2(-dz, dx)
-      b.box(len + 0.04, h, 1.0, mat, M(x, CURB + h / 2, z, yaw), 2)
-      c.physics.fixedBox(x, CURB + h / 2, z, (len + 0.04) / 2, h / 2, 0.5, yaw)
+      // a chequer of blue and white sections so the bowl reads as seating, not stripes
+      const mat = band ?? ((i + Math.floor(t / 3)) % 2 ? blue : white)
+      b.box(len + 0.04, h, run + 0.03, mat, M(x, CURB + h / 2, z, yaw), 2)
+      c.physics.fixedBox(x, CURB + h / 2, z, (len + 0.04) / 2, h / 2, (run + 0.03) / 2, yaw)
     }
   }
-  // rear concourse wall with its own gates, and a canopy over the upper tiers
+  // the facade: a tall wall of pale plaster ribs with rows of lit arched windows, a gap at each gate
+  const wall = new THREE.MeshStandardMaterial({ color: '#d8d2c4', roughness: 0.9 })
+  const rib = new THREE.MeshStandardMaterial({ color: '#b9b2a2', roughness: 0.9 })
+  const winMat = new THREE.MeshStandardMaterial({ color: '#202833', emissive: '#ffd9a0', emissiveIntensity: 0.1, roughness: 0.3 })
+  out.glow.push({ mat: winMat, day: 0.1, night: 2.2 })
+  const FH = 15
   for (let i = 0; i < SEC; i++) {
     const a0 = (i / SEC) * Math.PI * 2
     const a1 = ((i + 1) / SEC) * Math.PI * 2
     const am = (a0 + a1) / 2
-    if (Math.abs(Math.sin(am)) < 0.17) continue
-    const rxm = rx(T) + 0.6
-    const rzm = rz(T) + 0.6
+    if (gate(am)) continue
+    const rxm = rx(ROWS) + 1.2
+    const rzm = rz(ROWS) + 1.2
     const x = cx + Math.cos(am) * rxm
     const z = cz + Math.sin(am) * rzm
-    const len = Math.hypot((Math.cos(a1) - Math.cos(a0)) * rxm, (Math.sin(a1) - Math.sin(a0)) * rzm)
-    const yaw = Math.atan2(-(Math.sin(a1) - Math.sin(a0)) * rzm, (Math.cos(a1) - Math.cos(a0)) * rxm)
-    b.box(len + 0.04, 9, 0.8, m.plaster[1], M(x, CURB + 4.5, z, yaw), 3)
-    c.physics.fixedBox(x, CURB + 4.5, z, (len + 0.04) / 2, 4.5, 0.4, yaw)
-    if (i % 2 === 0) {
-      const cxr = cx + Math.cos(am) * (rx(5) + 0.5)
-      const czr = cz + Math.sin(am) * (rz(5) + 0.5)
-      b.box(0.3, 7.4, 0.3, m.frame, M(cxr, CURB + 3.7, czr), 1)
-    }
-    const rr = (rx(T) + rx(5)) / 2 + 0.5
-    const rzr = (rz(T) + rz(5)) / 2 + 0.5
-    b.box(len + 0.1, 0.35, rx(T) - rx(5) + 2, white, M(cx + Math.cos(am) * rr, CURB + 7.5, cz + Math.sin(am) * rzr, yaw), 2)
+    const dx = (Math.cos(a1) - Math.cos(a0)) * rxm
+    const dz = (Math.sin(a1) - Math.sin(a0)) * rzm
+    const len = Math.hypot(dx, dz)
+    const yaw = Math.atan2(-dz, dx)
+    b.box(len + 0.05, FH, 0.9, i % 4 === 0 ? rib : wall, M(x, CURB + FH / 2, z, yaw), 3)
+    c.physics.fixedBox(x, CURB + FH / 2, z, (len + 0.05) / 2, FH / 2, 0.45, yaw)
+    // windows on the outer face, facing away from the field
+    const nx = Math.cos(am) / RX
+    const nz = Math.sin(am) / RZ
+    const nl = Math.hypot(nx, nz)
+    const ox = x + (nx / nl) * 0.5
+    const oz = z + (nz / nl) * 0.5
+    if (i % 2 === 1) for (const y of [4, 9.2]) b.box(len * 0.45, 2.6, 0.12, winMat, M(ox, CURB + y, oz, yaw), 1)
   }
-  // floodlight pylons at the four corners, lit heads that glow after dark
+  // the roof: a continuous canopy over the upper rows, white, with a lit lip along its inner edge
+  const lip = new THREE.MeshStandardMaterial({ color: '#fff8e6', emissive: '#fff1c8', emissiveIntensity: 0.2 })
+  out.glow.push({ mat: lip, day: 0.2, night: 3.5 })
+  for (let i = 0; i < SEC; i++) {
+    const a0 = (i / SEC) * Math.PI * 2
+    const a1 = ((i + 1) / SEC) * Math.PI * 2
+    const am = (a0 + a1) / 2
+    const r0x = rx(10)
+    const r1x = rx(ROWS) + 2.8
+    const r0z = rz(10)
+    const r1z = rz(ROWS) + 2.8
+    const midx = (r0x + r1x) / 2
+    const midz = (r0z + r1z) / 2
+    const x = cx + Math.cos(am) * midx
+    const z = cz + Math.sin(am) * midz
+    const dx = (Math.cos(a1) - Math.cos(a0)) * midx
+    const dz = (Math.sin(a1) - Math.sin(a0)) * midz
+    const len = Math.hypot(dx, dz)
+    const yaw = Math.atan2(-dz, dx)
+    if (west(am)) continue // the pavilion has its own roof
+    b.box(len + 0.06, 0.55, r1x - r0x, white, M(x, CURB + 13.2, z, yaw), 3)
+    const lx = cx + Math.cos(am) * (r0x - 0.1)
+    const lz = cz + Math.sin(am) * (r0z - 0.1)
+    b.box(len + 0.04, 0.18, 0.3, lip, M(lx, CURB + 12.9, lz, yaw), 1)
+  }
+
+  // the pavilion at the west end: a two-storey club house with a balcony, a green roof and a flagpole
+  const px = cx - rx(8) - 4
+  b.box(14, 9, 20, white, M(px, CURB + 4.5, cz), 3)
+  b.box(14.8, 0.6, 20.8, new THREE.MeshStandardMaterial({ color: '#2a6b3d', roughness: 0.8 }), M(px, CURB + 9.3, cz), 3)
+  b.box(2.2, 2.0, 16, m.frame, M(px + 7.1, CURB + 5.2, cz), 1)
+  for (const dz of [-6, -2, 2, 6]) b.box(0.15, 1.5, 2.2, winMat, M(px + 7.15, CURB + 6.6, cz + dz), 1)
+  b.box(0.18, 14, 0.18, m.frame, M(px, CURB + 14.6, cz - 8), 1)
+  b.box(3, 1.6, 0.05, new THREE.MeshStandardMaterial({ color: '#1d4fa8' }), M(px + 1.5, CURB + 20.4, cz - 8), 1)
+  c.physics.fixedBox(px, CURB + 4.5, cz, 7, 4.5, 10)
+  // the sightscreen at the east end
+  b.box(0.4, 7, 9, white, M(cx + RX + 3.2, CURB + 3.5, cz), 2)
+  b.box(0.3, 0.4, 9.4, m.frame, M(cx + RX + 3.2, CURB + 7.2, cz), 1)
+  c.physics.fixedBox(cx + RX + 3.2, CURB + 3.5, cz, 0.3, 3.5, 4.5)
+
+  // floodlight pylons at the four corners; lamp panels glow after dark
   const lamp = new THREE.MeshStandardMaterial({ color: '#fffbe8', emissive: '#fff1c8', emissiveIntensity: 0.3 })
   out.glow.push({ mat: lamp, day: 0.3, night: 6 })
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    const px = cx + sx * (RX + 14)
-    const pz = cz + sz * (RZ + 11)
-    b.box(1.0, 42, 1.0, m.frame, M(px, CURB + 21, pz), 1)
-    b.box(8, 4.5, 0.7, m.frame, M(px, CURB + 42.5, pz, Math.atan2(sx, sz) + Math.PI), 1)
-    for (let k = -1; k <= 1; k++) for (let j = 0; j < 2; j++) b.box(1.9, 1.7, 0.2, lamp, M(px - sx * 0.9 + k * 2.2 * (sz > 0 ? 1 : 1) * 0.0 + k * 1.1, CURB + 41.6 + j * 1.9, pz - sz * 0.42, Math.atan2(-sx, -sz)), 1)
-    c.physics.fixedCylinder(px, CURB + 4, pz, 0.7, 8)
+    const fx = cx + sx * 37.5
+    const fz = cz + sz * 36.5
+    b.box(1.1, 44, 1.1, m.frame, M(fx, CURB + 22, fz), 1)
+    b.box(8.5, 5, 0.8, m.frame, M(fx, CURB + 45, fz, Math.atan2(sx, sz) + Math.PI), 1)
+    for (let k = -1; k <= 1; k++) for (let j = 0; j < 2; j++) b.box(2.2, 1.9, 0.22, lamp, M(fx - sx * 0.6 + k * 0.0, CURB + 44 + j * 2.1, fz - sz * 0.6 + k * 1.4, Math.atan2(-sx, -sz)), 1)
+    c.physics.fixedCylinder(fx, CURB + 4, fz, 0.8, 8)
   }
-  // scoreboards and the name over the gates
-  const board = new THREE.Mesh(new THREE.PlaneGeometry(14, 4.6), new THREE.MeshStandardMaterial({ map: labelTexture(['EDEN GARDENS', 'Kolkata · since 1864'], '#07121f', '#ffd23a', 1024, 256, '#1d9bf0'), emissive: '#ffffff', roughness: 0.4, emissiveIntensity: 0.6 }))
+  // a ring of floodlights along the roof edge
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2
+    b.box(0.8, 0.6, 0.5, lamp, M(cx + Math.cos(a) * (rx(ROWS) + 2.6), CURB + 14, cz + Math.sin(a) * (rz(ROWS) + 2.6), -a), 1)
+  }
+  // scoreboard, names over the gates, ticket booths
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(16, 5), new THREE.MeshStandardMaterial({ map: labelTexture(['EDEN GARDENS', 'Kolkata · since 1864'], '#07121f', '#ffd23a', 1024, 256, '#1d9bf0'), emissive: '#ffffff', roughness: 0.4, emissiveIntensity: 0.6 }))
   ;(board.material as THREE.MeshStandardMaterial).emissiveMap = (board.material as THREE.MeshStandardMaterial).map
-  board.position.set(cx, CURB + T * rise + 4, cz - rz(T) - 0.2)
+  board.position.set(cx + rx(9) + 3.2, CURB + 9.5, cz)
+  board.rotation.y = -Math.PI / 2
   group.add(board)
   for (const s of [-1, 1]) {
-    const name = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.2), new THREE.MeshStandardMaterial({ map: labelTexture(['EDEN GARDENS', 'Home of Bengal cricket'], '#0d2f6b', '#ffffff', 1024, 256, '#ffd23a'), roughness: 0.6 }))
-    name.position.set(cx + s * (rx(T) + 1.2), CURB + 10.8, cz)
-    name.rotation.y = s * Math.PI / 2
+    const name = new THREE.Mesh(new THREE.PlaneGeometry(18, 3.6), new THREE.MeshStandardMaterial({ map: labelTexture(['EDEN GARDENS', 'Home of Bengal cricket'], '#0d2f6b', '#ffffff', 1024, 256, '#ffd23a'), roughness: 0.6 }))
+    name.position.set(cx, CURB + FH - 1.2, cz + s * (rz(ROWS) + 1.7))
+    if (s < 0) name.rotation.y = Math.PI
     group.add(name)
+    for (const dx of [-12, 12]) {
+      b.box(2.4, 2.6, 1.8, m.frame, M(cx + dx, CURB + 1.3, cz + s * (rz(ROWS) + 4)), 1)
+      c.physics.fixedBox(cx + dx, CURB + 1.3, cz + s * (rz(ROWS) + 4), 1.2, 1.3, 0.9)
+    }
   }
-  nightLight(c, cx, CURB, cz, '#e8ffe0', 130, 52)
-  // a few trees outside the stand and lamps on the corners
+  nightLight(c, cx, CURB, cz, '#e8ffe0', 130, 56)
   for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]] as const) {
-    tree(c, cx + sx * 37, cz + sz * 33, 1.2)
-    lampAt(c, cx + sx * 38, cz + sz * 38, cx, cz)
+    tree(c, cx + sx * 39.5, cz + sz * 39, 1.2)
   }
 }
 

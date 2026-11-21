@@ -6,9 +6,10 @@ import type { Materials } from '../city/Town'
 import { Batch, M } from '../city/Batch'
 import { Panorama, PEAKS } from './Panorama'
 import { buildPortal, labelTexture } from './Portal'
-import { HB, HILLS_Z, HeightGrid, ROUTE, ROUTE_LENGTH, VIEW, VIEW_Y, BASECAMP, SUMMIT, START, nearestRoute } from './Route'
+import { HB, HILLS_Z, HeightGrid, outerHeight, ROUTE, ROUTE_LENGTH, VIEW, VIEW_Y, BASECAMP, SUMMIT, START, nearestRoute } from './Route'
 import type { Spot } from '../city/Landmarks'
-import { clamp, rng, noise2 } from '../../utils/math'
+import { clamp, rng, noise2, smoothstep } from '../../utils/math'
+import { ChunkedTerrain, terrainMaterial, microDetail } from '../Terrain'
 
 /* ──────────────────────────────────────────────────────────────
    THE HILLS
@@ -28,7 +29,7 @@ export class Hills {
   readonly panorama: Panorama
   onEvent?: (e: HillEvent) => void
   private grid!: HeightGrid
-  private trees: { mesh: THREE.InstancedMesh; c: THREE.Vector3 }[] = []
+  private trees: { mesh: THREE.InstancedMesh; c: THREE.Vector3; far: number }[] = []
   private clouds: THREE.Mesh[] = []
   private cloudMats: THREE.ShaderMaterial[] = []
   private fired = new Set<HillEvent>()
@@ -142,87 +143,31 @@ export class Hills {
 
   /* ── terrain ──────────────────────────────────────────────── */
 
+  private terrainChunks!: ChunkedTerrain
+  private outerChunks!: ChunkedTerrain
+
   private terrain() {
     const g = this.grid
-    const n = (g.nx + 1) * (g.nz + 1)
-    const pos = new Float32Array(n * 3)
-    const nor = new Float32Array(n * 3)
-    const idx = new Uint32Array(g.nx * g.nz * 6)
-    const W = g.nz + 1
-    for (let j = 0; j <= g.nx; j++) {
-      for (let i = 0; i <= g.nz; i++) {
-        const k = j * W + i
-        pos.set([HB.x0 + j * g.res, g.h[k], HILLS_Z + HB.z0 + i * g.res], k * 3)
-        const hl = g.h[Math.max(0, j - 1) * W + i]
-        const hr = g.h[Math.min(g.nx, j + 1) * W + i]
-        const hd = g.h[j * W + Math.max(0, i - 1)]
-        const hu = g.h[j * W + Math.min(g.nz, i + 1)]
-        const nx = (hl - hr) / (2 * g.res)
-        const nz = (hd - hu) / (2 * g.res)
-        const l = Math.hypot(nx, 1, nz)
-        nor.set([nx / l, 1 / l, nz / l], k * 3)
-      }
+    const mat = terrainMaterial(this.assets, true)
+    // the ground the player sees: the 10 m grid (with the road cut into it) plus rock and crag detail off the road,
+    // and the analytic mountain beyond the grid, so the horizon is real land
+    const height = (x: number, z: number, detail: number) => {
+      const lz = z - HILLS_Z
+      const inside = x > HB.x0 + 12 && x < HB.x1 - 12 && lz > HB.z0 + 12 && lz < HB.z1 - 12
+      const h = inside ? g.at(x, lz) : outerHeight(x, lz)
+      const rw = inside ? g.roadAt(x, lz) : 0
+      const amp = (0.25 + 1.6 * smoothstep(450, 800, h)) * (1 - rw)
+      return h + microDetail(x, z, detail * amp)
     }
-    let t = 0
-    for (let j = 0; j < g.nx; j++) {
-      for (let i = 0; i < g.nz; i++) {
-        const a = j * W + i
-        const b = (j + 1) * W + i
-        const c = j * W + i + 1
-        const d = (j + 1) * W + i + 1
-        idx.set([a, c, b, b, c, d], t)
-        t += 6
-      }
-    }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3))
-    geo.setIndex(new THREE.BufferAttribute(idx, 1))
-    geo.computeBoundingSphere()
-
-    const grass = this.assets.textures.get('aerial_grass_rock')
-    const rock = this.assets.textures.get('rocky_terrain_02')
-    const mat = new THREE.MeshStandardMaterial({ roughness: 1, map: grass?.map ?? null })
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.tRock = { value: rock?.map }
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
-        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);')
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>
-          varying vec3 vWPos; varying vec3 vWNrm; uniform sampler2D tRock;
-          float h21(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
-          float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-            return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }`)
-        .replace('#include <map_fragment>', `
-          vec2 uvW = vWPos.xz / 6.0;
-          vec3 g1 = texture2D(map, uvW).rgb;
-          vec3 g2 = texture2D(map, uvW * 0.21 + 0.37).rgb;
-          vec3 grassC = mix(g1, g2, 0.5);
-          float macro = vn(vWPos.xz * 0.01) * 0.6 + vn(vWPos.xz * 0.04) * 0.4;
-          vec3 rockC = texture2D(tRock, vWPos.xz / 8.0).rgb;
-          float slope = 1.0 - clamp(vWNrm.y, 0.0, 1.0);
-          float alt = vWPos.y;
-          // forest floor low down, dry alpine meadow higher, then bare rock and snow
-          vec3 forest = grassC * vec3(0.55, 0.78, 0.45) * mix(0.7, 1.1, macro);
-          vec3 meadow = grassC * vec3(0.95, 0.88, 0.6) * mix(0.8, 1.15, macro);
-          vec3 col = mix(forest, meadow, smoothstep(280.0, 470.0, alt + (macro - 0.5) * 80.0));
-          float rockW = smoothstep(0.20, 0.38, slope) + smoothstep(470.0, 600.0, alt) * 0.55;
-          col = mix(col, rockC * 0.9, clamp(rockW, 0.0, 1.0));
-          // snow: settles above the snowline, slides off steep faces
-          float snowLine = 600.0 + (macro - 0.5) * 140.0;
-          float snow = smoothstep(snowLine - 40.0, snowLine + 70.0, alt) * (1.0 - smoothstep(0.42, 0.72, slope) * 0.85);
-          // snow isn't flat white: wind-packed drifts, cool shadow in the hollows
-          float drift = vn(vWPos.xz * 0.22) * 0.6 + vn(vWPos.xz * 1.1) * 0.4;
-          vec3 snowC = mix(vec3(0.70, 0.77, 0.92), vec3(0.98, 0.97, 0.98), clamp(drift * 0.9 + (vWNrm.y - 0.6) * 0.8, 0.0, 1.0));
-          col = mix(col, snowC, snow);
-          diffuseColor.rgb *= col;`)
-        .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = roughness;')
-    }
-    const mesh = new THREE.Mesh(geo, mat)
-    mesh.receiveShadow = true
-    mesh.name = 'hills-terrain'
-    this.group.add(mesh)
+    const inner = { x0: HB.x0, z0: HILLS_Z + HB.z0, x1: HB.x1, z1: HILLS_Z + HB.z1 }
+    this.terrainChunks = new ChunkedTerrain(inner, 150, [{ cell: 3.75, dist: 230, detail: 1 }, { cell: 7.5, dist: 620, detail: 0.5 }, { cell: 18.75, dist: 1e9, detail: 0 }], height, mat)
+    this.group.add(this.terrainChunks.group)
+    this.terrainChunks.prime(new THREE.Vector3(this.arrive.x, 0, this.arrive.z))
+    // far ranges: six big chunks all round, coarse, snow-capped
+    const ring = 6 * 300
+    this.outerChunks = new ChunkedTerrain({ x0: inner.x0 - ring, z0: inner.z0 - ring, x1: inner.x1 + ring, z1: inner.z1 + ring }, 300, [{ cell: 50, dist: 1e9, detail: 0 }], height, mat, inner)
+    this.group.add(this.outerChunks.group)
+    this.outerChunks.prime(new THREE.Vector3(this.arrive.x, 0, this.arrive.z))
 
     const body = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation((HB.x0 + HB.x1) / 2, 0, HILLS_Z + (HB.z0 + HB.z1) / 2))
     this.physics.world.createCollider(RAPIER.ColliderDesc.heightfield(g.nz, g.nx, g.h, { x: g.nx * g.res, y: 1, z: g.nz * g.res }), body)
@@ -283,6 +228,7 @@ export class Hills {
 
     // low stone parapets on the downhill side, where there is a drop
     const wallPos: number[] = []
+    const wallUv: number[] = []
     const wallIdx: number[] = []
     let wb = 0
     // walls on both sides along the whole climb: nobody drives off a mountain road (the tunnel and the viewpoint apron stay open)
@@ -302,6 +248,8 @@ export class Hills {
           quad.push(px(inner), p.y, pz(inner), px(inner), p.y + 0.75, pz(inner), px(outer), p.y + 0.75, pz(outer), px(outer), p.y, pz(outer))
         }
         wallPos.push(...quad)
+        // painted stones: black and white every 1.4 m, like the real hill roads
+        for (const p of [a, c]) for (const v of [0, 1, 1, 0]) wallUv.push(p.s / 1.4, v)
         // top, inner and outer faces (both windings so it is solid from any side)
         const f = (a1: number, a2: number, a3: number, a4: number) => wallIdx.push(wb + a1, wb + a2, wb + a3, wb + a1, wb + a3, wb + a4)
         f(1, 2, 6, 5)
@@ -313,10 +261,21 @@ export class Hills {
     if (wallPos.length) {
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(wallPos, 3))
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(wallUv, 2))
       g.setIndex(wallIdx)
       cleanNormals(g)
-      const wallMat = (m.concrete as THREE.MeshStandardMaterial).clone()
-      wallMat.side = THREE.DoubleSide
+      const stripe = document.createElement('canvas')
+      stripe.width = 64
+      stripe.height = 4
+      const sg = stripe.getContext('2d')!
+      sg.fillStyle = '#1d1d20'
+      sg.fillRect(0, 0, 32, 4)
+      sg.fillStyle = '#e8e4d6'
+      sg.fillRect(32, 0, 32, 4)
+      const stripeTex = new THREE.CanvasTexture(stripe)
+      stripeTex.colorSpace = THREE.SRGBColorSpace
+      stripeTex.wrapS = THREE.RepeatWrapping
+      const wallMat = new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9, side: THREE.DoubleSide })
       const wall = new THREE.Mesh(g, wallMat)
       wall.castShadow = true
       this.group.add(wall)
@@ -331,59 +290,142 @@ export class Hills {
     b.build(this.group)
   }
 
-  /* ── pines ────────────────────────────────────────────────── */
+  /* ── forest, undergrowth and rock ─────────────────────────── */
 
   private forest() {
     const density = this.quality.density
-    // a tree: a trunk and three skirts of needles, vertex-coloured so one draw does it all
-    const parts: THREE.BufferGeometry[] = []
     const paint = (g: THREE.BufferGeometry, c: THREE.Color) => {
-      const n = g.attributes.position.count
+      const ng = g.index ? g.toNonIndexed() : g
+      const n = ng.attributes.position.count
       const col = new Float32Array(n * 3)
       for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3)
-      g.setAttribute('color', new THREE.BufferAttribute(col, 3))
-      return g
+      ng.setAttribute('color', new THREE.BufferAttribute(col, 3))
+      if (!ng.attributes.normal) ng.computeVertexNormals()
+      return ng
     }
-    const trunk = new THREE.CylinderGeometry(0.22, 0.34, 2.4, 5).translate(0, 1.2, 0)
-    parts.push(paint(trunk.toNonIndexed(), new THREE.Color('#3b2a1c')))
-    for (const [r, h, y, c] of [[2.4, 4.6, 3.4, '#173a22'], [1.9, 4.0, 5.9, '#1b4527'], [1.3, 3.4, 8.0, '#20502c']] as const) {
-      const cone = new THREE.ConeGeometry(r, h, 7, 1).translate(0, y + h / 2 - 1.2, 0)
-      parts.push(paint(cone.toNonIndexed(), new THREE.Color(c)))
+    const conifer = (trunk: number, layers: [number, number, number, string][]) => {
+      const parts = [paint(new THREE.CylinderGeometry(0.2, 0.34, trunk, 5).translate(0, trunk / 2, 0), new THREE.Color('#3b2a1c'))]
+      for (const [rad, h, y, c] of layers) parts.push(paint(new THREE.ConeGeometry(rad, h, 8, 1).translate(0, y + h / 2, 0), new THREE.Color(c)))
+      return mergeParts(parts)
     }
-    const merged = mergeParts(parts)
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })
+    const blob = (rx: number, ry: number, x: number, y: number, z: number, c: string, seed: number) => {
+      const g = new THREE.IcosahedronGeometry(1, 1)
+      const p = g.attributes.position as THREE.BufferAttribute
+      for (let i = 0; i < p.count; i++) {
+        const k = 0.8 + 0.4 * noise2(p.getX(i) * 3 + seed, p.getZ(i) * 3 + p.getY(i) * 2)
+        p.setXYZ(i, p.getX(i) * rx * k + x, p.getY(i) * ry * k + y, p.getZ(i) * rx * k + z)
+      }
+      g.computeVertexNormals()
+      return paint(g, new THREE.Color(c))
+    }
+    const kinds = [
+      // spruce: tall and narrow with many tiers
+      conifer(2.2, [[2.2, 4.2, 2.6, '#14331f'], [1.9, 3.8, 4.9, '#173a22'], [1.5, 3.4, 7.0, '#1b4227'], [1.1, 3.0, 8.9, '#1f4a2b'], [0.7, 2.6, 10.6, '#245230']]),
+      // fir: a fuller, darker cone
+      conifer(2.6, [[2.8, 5.2, 2.8, '#102d1b'], [2.2, 4.6, 5.6, '#14331f'], [1.4, 3.8, 8.4, '#193c25']]),
+      // pine: a few broad flat skirts on a long bare trunk
+      conifer(5.0, [[2.6, 2.6, 5.0, '#1d4a2a'], [2.1, 2.4, 6.8, '#235430'], [1.4, 2.2, 8.4, '#2a5c35']]),
+      // broadleaf: rhododendron and oak, lighter and rounder
+      mergeParts([paint(new THREE.CylinderGeometry(0.22, 0.4, 3.2, 6).translate(0, 1.6, 0), new THREE.Color('#4a3524')), blob(2.6, 2.1, 0, 4.4, 0, '#3f6b2a', 1), blob(2.0, 1.7, 1.2, 5.4, 0.5, '#4a7a30', 5), blob(1.9, 1.6, -1.1, 5.0, -0.6, '#386328', 9)]),
+    ]
+    const shrubGeo = mergeParts([blob(1.1, 0.8, 0, 0.6, 0, '#35592a', 2), blob(0.8, 0.6, 0.8, 0.45, 0.4, '#406830', 7), blob(0.7, 0.55, -0.7, 0.4, -0.3, '#2e4f25', 12)])
+    const rockGeo = (() => {
+      const g = new THREE.IcosahedronGeometry(1, 1)
+      const p = g.attributes.position as THREE.BufferAttribute
+      for (let i = 0; i < p.count; i++) {
+        const k = 0.7 + 0.5 * noise2(p.getX(i) * 2.3 + 4, p.getZ(i) * 2.3 + p.getY(i) * 3)
+        p.setXYZ(i, p.getX(i) * k * 1.2, p.getY(i) * k * 0.7, p.getZ(i) * k)
+      }
+      g.computeVertexNormals()
+      return paint(g, new THREE.Color('#7b7a76'))
+    })()
+    const treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })
+    const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true })
     const r = rng(31337)
     const CELL = 120
-    const cells = new Map<string, THREE.Matrix4[]>()
-    const tries = Math.round(9000 * density)
-    for (let k = 0; k < tries; k++) {
-      const lx = HB.x0 + r() * (HB.x1 - HB.x0)
-      const lz = HB.z0 + r() * (HB.z1 - 150 - HB.z0)
-      const y = this.grid.at(lx, lz)
-      // forest from the plain to the tree line; thinner as it climbs
-      const keep = 1 - clamp((y - 250) / 200)
-      if (y < 4 || r() > keep) continue
-      const sl = Math.abs(this.grid.at(lx + 6, lz) - this.grid.at(lx - 6, lz)) / 12 + Math.abs(this.grid.at(lx, lz + 6) - this.grid.at(lx, lz - 6)) / 12
-      if (sl > 0.9) continue
-      const nr = nearestRoute(lx, lz, 1)
-      if (nr && nr.d < nr.p.w / 2 + 7) continue
-      if (Math.hypot(lx - VIEW.x, lz - VIEW.z) < 70) continue
-      const s = 0.8 + r() * 0.8
-      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * 6.28)
-      const mx = new THREE.Matrix4().compose(new THREE.Vector3(lx, y - 0.2, HILLS_Z + lz), q, new THREE.Vector3(s, s * (0.9 + r() * 0.5), s))
+    type Cells = Map<string, THREE.Matrix4[]>
+    const treeCells: Cells[] = kinds.map(() => new Map())
+    const shrubCells: Cells = new Map()
+    const rockCells: Cells = new Map()
+    const add = (cells: Cells, lx: number, lz: number, mx: THREE.Matrix4) => {
       const key = `${Math.floor(lx / CELL)},${Math.floor(lz / CELL)}`
       let a = cells.get(key)
       if (!a) cells.set(key, (a = []))
       a.push(mx)
     }
-    for (const list of cells.values()) {
-      const mesh = new THREE.InstancedMesh(merged, mat, list.length)
-      list.forEach((mx, i) => mesh.setMatrixAt(i, mx))
-      mesh.castShadow = true
-      mesh.computeBoundingSphere()
-      this.group.add(mesh)
-      this.trees.push({ mesh, c: mesh.boundingSphere!.center.clone() })
+    const place = (lx: number, y: number, lz: number, s: number, sy: number, tilt = 0) => {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((r() - 0.5) * tilt, r() * 6.28, (r() - 0.5) * tilt))
+      return new THREE.Matrix4().compose(new THREE.Vector3(lx, y, HILLS_Z + lz), q, new THREE.Vector3(s, s * sy, s))
     }
+    const slopeAt = (lx: number, lz: number) => Math.abs(this.grid.at(lx + 6, lz) - this.grid.at(lx - 6, lz)) / 12 + Math.abs(this.grid.at(lx, lz + 6) - this.grid.at(lx, lz - 6)) / 12
+    const tries = Math.round(24000 * density)
+    for (let k = 0; k < tries; k++) {
+      const lx = HB.x0 + 40 + r() * (HB.x1 - HB.x0 - 80)
+      const lz = HB.z0 + 40 + r() * (HB.z1 - 150 - HB.z0 - 40)
+      const y = this.grid.at(lx, lz)
+      // forest from the plain to the tree line, thinning as it climbs
+      const keep = 1 - clamp((y - 300) / 220)
+      if (y < 3 || r() > keep) continue
+      if (slopeAt(lx, lz) > 1.1) continue
+      const nr = nearestRoute(lx, lz, 1)
+      if (nr && nr.d < nr.p.w / 2 + 5) continue
+      if (Math.hypot(lx - VIEW.x, lz - VIEW.z) < 70) continue
+      // lower slopes: broadleaf and tea-country trees; higher: conifers
+      const u = r()
+      const kind = y < 160 && u < 0.45 ? 3 : u < 0.5 ? 0 : u < 0.78 ? 1 : u < 0.92 ? 2 : 3
+      const s = 0.75 + r() * 0.8
+      add(treeCells[kind], lx, lz, place(lx, y - 0.2, lz, s, 0.85 + r() * 0.45, 0.06))
+    }
+    // undergrowth: thick along the road edges, scattered through the forest
+    const shrubs = Math.round(16000 * density)
+    for (let k = 0; k < shrubs; k++) {
+      const i = Math.floor(r() * ROUTE.length)
+      const near = k % 2 === 0
+      const p = near ? ROUTE[i] : null
+      const lx = p ? p.x + p.nx * (r() < 0.5 ? 1 : -1) * (p.w / 2 + 2 + r() * 12) : HB.x0 + 40 + r() * (HB.x1 - HB.x0 - 80)
+      const lz = p ? p.z + p.nz * 0 + (r() - 0.5) * 6 : HB.z0 + 40 + r() * (HB.z1 - 150 - HB.z0 - 40)
+      const y = this.grid.at(lx, lz)
+      if (y < 3 || y > 470 + r() * 40 || slopeAt(lx, lz) > 1.0) continue
+      const nr = nearestRoute(lx, lz, 1)
+      if (nr && nr.d < nr.p.w / 2 + 1.6) continue
+      const s = 0.6 + r() * 0.9
+      add(shrubCells, lx, lz, place(lx, y - 0.1, lz, s, 0.8 + r() * 0.5))
+    }
+    // rock: along the cuts, on steep faces and strewn above the tree line
+    const rocks = Math.round(7000 * density)
+    for (let k = 0; k < rocks; k++) {
+      let lx: number
+      let lz: number
+      if (k % 3 === 0) {
+        const p = ROUTE[Math.floor(r() * ROUTE.length)]
+        const side = r() < 0.5 ? 1 : -1
+        lx = p.x + p.nx * side * (p.w / 2 + 1.5 + r() * 18)
+        lz = p.z + p.nz * side * (p.w / 2 + 1.5 + r() * 18)
+      } else {
+        lx = HB.x0 + 40 + r() * (HB.x1 - HB.x0 - 80)
+        lz = HB.z0 + 40 + r() * (HB.z1 - 150 - HB.z0 - 40)
+      }
+      const y = this.grid.at(lx, lz)
+      const sl = slopeAt(lx, lz)
+      if (y < 3 || (k % 3 !== 0 && sl < 0.45 && y < 480)) continue
+      const nr = nearestRoute(lx, lz, 1)
+      if (nr && nr.d < nr.p.w / 2 + 1.4) continue
+      const s = 0.5 + r() * r() * 3.2
+      add(rockCells, lx, lz, place(lx, y - s * 0.25, lz, s, 0.9, 0.4))
+    }
+    const build = (cells: Cells, geo: THREE.BufferGeometry, mat: THREE.Material, cast: boolean, far: number) => {
+      for (const list of cells.values()) {
+        const mesh = new THREE.InstancedMesh(geo, mat, list.length)
+        list.forEach((mx, i) => mesh.setMatrixAt(i, mx))
+        mesh.castShadow = cast
+        mesh.computeBoundingSphere()
+        this.group.add(mesh)
+        this.trees.push({ mesh, c: mesh.boundingSphere!.center.clone(), far })
+      }
+    }
+    treeCells.forEach((cells, i) => build(cells, kinds[i], treeMat, true, 1))
+    build(shrubCells, shrubGeo, treeMat, false, 0.55)
+    build(rockCells, rockGeo, rockMat, false, 0.7)
   }
 
   /* ── the tunnel exit and a welcome gate ───────────────────── */
@@ -617,12 +659,14 @@ export class Hills {
 
   update(dt: number, t: number, cam: THREE.Vector3, focus: THREE.Vector3, haze: THREE.Color, alpenglow: number, night: number) {
     if (!this.built) return
+    this.terrainChunks.update(focus, dt)
+    this.outerChunks.update(focus, dt)
     // distance-cull pine chunks
     this.cull -= dt
     if (this.cull <= 0) {
       this.cull = 0.3
       const far = this.quality.tier === 'high' ? 380 : this.quality.tier === 'mid' ? 300 : 220
-      for (const tr of this.trees) tr.mesh.visible = Math.hypot(tr.c.x - focus.x, tr.c.z - focus.z) < far + 90
+      for (const tr of this.trees) tr.mesh.visible = Math.hypot(tr.c.x - focus.x, tr.c.z - focus.z) < (far + 90) * tr.far
     }
     const lz = focus.z - HILLS_Z
     // how far along the expedition you are: the range rises as you approach it

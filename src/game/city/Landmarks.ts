@@ -41,7 +41,7 @@ type Ctx = {
   spec: Spec
   r: () => number
   models: Map<string, GLTF>
-  nightLights: { light: THREE.PointLight; power: number }[]
+  nightLights: NightSpot[]
   lampMat: THREE.MeshStandardMaterial
   fairy: FairyBuffer
 }
@@ -205,12 +205,11 @@ function placeModel(ctx: Ctx, name: string, lx: number, lz: number, yaw: number,
   return { holder, box }
 }
 
-/** a simple point light that only shines after dark (kept in the scene at 0 so shaders never recompile) */
+/** a place that is lit after dark. Real lights are costly (every surface pays for each one), so a few shared lights sit on the nearest spots to the player. */
+export type NightSpot = { pos: THREE.Vector3; color: THREE.Color; power: number; range: number }
+
 function nightLight(ctx: Ctx, lx: number, ly: number, lz: number, color = '#ffd8a8', power = 30, range = 18) {
-  const l = new THREE.PointLight(color, 0, range, 1.6)
-  l.position.setFromMatrixPosition(ctx.at(lx, ly, lz))
-  ctx.group.add(l)
-  ctx.nightLights.push({ light: l, power })
+  ctx.nightLights.push({ pos: new THREE.Vector3().setFromMatrixPosition(ctx.at(lx, ly, lz)), color: new THREE.Color(color), power, range })
 }
 
 /** low wall around a compound, with a gap for the gate at local x in [g0, g1] on the front */
@@ -736,11 +735,19 @@ export class Landmarks {
   private markers: THREE.Mesh[] = []
   private signMats: THREE.MeshStandardMaterial[] = []
 
-  readonly nightLights: { light: THREE.PointLight; power: number }[] = []
+  readonly nightLights: NightSpot[] = []
+  private pool: THREE.PointLight[] = []
+  private poolTimer = 0
   readonly fairy: FairyBuffer = { pos: [], col: [] }
   private lampMat = new THREE.MeshStandardMaterial({ color: '#fff6e0', emissive: '#ffe2b0', emissiveIntensity: 0.2 })
 
-  constructor(private physics: Physics, private mats: Materials, private tex: Map<string, THREE.Texture>, private models: Map<string, GLTF>) {}
+  constructor(private physics: Physics, private mats: Materials, private tex: Map<string, THREE.Texture>, private models: Map<string, GLTF>, poolSize = 4) {
+    for (let i = 0; i < poolSize; i++) {
+      const l = new THREE.PointLight('#ffd8a8', 0, 20, 1.6)
+      this.pool.push(l)
+      this.group.add(l)
+    }
+  }
 
   build() {
     const b = new Batch()
@@ -765,8 +772,26 @@ export class Landmarks {
     b.build(this.group)
   }
 
-  update(t: number, night: number) {
-    for (const n of this.nightLights) n.light.intensity = night > 0.3 ? n.power * night : 0
+  update(t: number, night: number, focus: THREE.Vector3) {
+    // the shared lights move to the spots nearest the player; far from every spot they stay dark
+    this.poolTimer -= 0.016
+    if (this.poolTimer <= 0) {
+      this.poolTimer = 0.35
+      const near = this.nightLights
+        .map((n) => ({ n, d: n.pos.distanceToSquared(focus) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, this.pool.length)
+      this.pool.forEach((l, i) => {
+        const e = near[i]
+        if (e && e.d < 90 * 90) {
+          l.position.copy(e.n.pos)
+          l.color.copy(e.n.color)
+          l.distance = e.n.range
+          ;(l as THREE.PointLight & { _power?: number })._power = e.n.power
+        } else (l as THREE.PointLight & { _power?: number })._power = 0
+      })
+    }
+    for (const l of this.pool) l.intensity = night > 0.3 ? ((l as THREE.PointLight & { _power?: number })._power ?? 0) * night : 0
     this.lampMat.emissiveIntensity = 0.2 + (night > 0.3 ? night * 4 : 0)
     for (const [i, mk] of this.markers.entries()) {
       const s = 1 + Math.sin(t * 2.4 + i) * 0.06

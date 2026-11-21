@@ -18,9 +18,9 @@ export const VIEW_Y = 520 // altitude of the viewpoint (local metres, exaggerate
 export const VIEW = { x: 0, z: -1500 }
 export const BASECAMP = { x: 10, z: -2850 }
 export const SUMMIT = { x: -6, z: -3200 }
-export const START = { x: -800, z: -120 }
+export const START = { x: -1100, z: -120 }
 /** the bounds of the region's terrain */
-export const HB = { x0: -1300, x1: 800, z0: -3350, z1: 250 }
+export const HB = { x0: -1750, x1: 800, z0: -3350, z1: 250 }
 
 const sstep = (a: number, b: number, v: number) => {
   const t = clamp((v - a) / (b - a))
@@ -29,7 +29,7 @@ const sstep = (a: number, b: number, v: number) => {
 
 export type RoutePoint = { x: number; z: number; y: number; s: number; w: number; nx: number; nz: number }
 
-const DX = 76
+const DX = 100
 const LEGS = 11
 const X0 = START.x
 const ZS = -300
@@ -141,12 +141,21 @@ function baseHeight(lx: number, lz: number) {
   const ramp = sstep(0, 1, (-lz - 150) / 150)
   const Hc = crestHeight(lz)
   let prof: number
-  if (lx < 0) prof = Math.max(0, Hc - (VIEW_Y / 760) * Math.max(0, -lx - 40))
+  if (lx < 0) prof = Math.max(0, Hc - (VIEW_Y / (-START.x - 40)) * Math.max(0, -lx - 40))
   else prof = Math.max(-240, Hc - 1.4 * Math.max(0, lx - 40))
   if (lx > 350) prof += sstep(350, 650, lx) * 420
-  if (lx < -1050) prof += sstep(-1050, -1250, lx) * 360
   prof += sstep(-3050, -3300, lz) * 500
   let h = prof * ramp
+  // beyond the playable ground the land climbs into snow-capped ranges: tall to the west, north and south, lower to the east so the Himalaya stay in view
+  const od = Math.hypot(Math.max(HB.x0 - lx, 0, lx - HB.x1), Math.max(HB.z0 - lz, 0, lz - HB.z1))
+  if (od > 0) {
+    const f = sstep(0, 1100, od)
+    const side = lx > HB.x1 ? 0.4 : lz > HB.z1 ? 0.7 : 1
+    // broad massifs with a few ridges: rounded like real mountains, not spikes
+    const m = noise2(lx * 0.0011 + 3, lz * 0.0011 - 2) * 0.6 + noise2(lx * 0.0032, lz * 0.0032 + 5) * 0.3 + noise2(lx * 0.009 + 1, lz * 0.009) * 0.1
+    const ridge = 1 - Math.abs(noise2(lx * 0.0022 + 8, lz * 0.0022) * 2 - 1)
+    h += f * side * (300 + 1150 * (0.72 * m + 0.28 * ridge * ridge))
+  }
   // rock and ridges: relief grows with altitude
   const amp = 8 + 60 * clamp(h / 700)
   h += (fbm(lx, lz) - 0.5) * amp * ramp
@@ -157,8 +166,17 @@ function baseHeight(lx: number, lz: number) {
   return h
 }
 
+/** the mountain without the road: valid anywhere, including the far ranges beyond the playable ground */
+export const outerHeight = (lx: number, lz: number) => baseHeight(lx, lz)
+
 export function terrainHeight(lx: number, lz: number) {
+  return terrainSample(lx, lz)[0]
+}
+
+/** [height, road weight]: the weight is 1 on the road and fades to 0 across the cut and fill banks */
+export function terrainSample(lx: number, lz: number): [number, number] {
   let h = baseHeight(lx, lz)
+  let rw = 0
   // a flat apron around the viewpoint
   const dv = Math.hypot(lx - VIEW.x, lz - VIEW.z)
   const wv = 1 - sstep(26, 80, dv)
@@ -167,10 +185,14 @@ export function terrainHeight(lx: number, lz: number) {
   const n = nearestRoute(lx, lz)
   if (n) {
     const d = n.d - n.p.w / 2
-    const w = 1 - sstep(3, 36, d)
+    // a flat bench for the road and a long, gentle bank: the cut blends into the mountain over 55 m
+    const t0 = clamp((d - 2.5) / 55)
+    const w = 1 - t0 * t0 * t0 * (t0 * (t0 * 6 - 15) + 10)
     if (w > 0) h = lerp(h, n.p.y - 0.35, w)
+    rw = w
   }
-  return h
+  const wv2 = 1 - sstep(26, 80, dv)
+  return [h, Math.max(rw, wv2)]
 }
 
 /** the terrain sampled once on a grid: used for the mesh, the physics heightfield, and placing things */
@@ -178,15 +200,32 @@ export class HeightGrid {
   readonly nx: number
   readonly nz: number
   readonly h: Float32Array // [j * (nz + 1) + i], j along x, i along z (the layout Rapier wants)
+  /** 1 on the road corridor and the viewpoint apron, 0 elsewhere: no micro-relief where it is flat on purpose */
+  readonly road: Float32Array
 
   constructor(readonly res: number) {
     this.nx = Math.round((HB.x1 - HB.x0) / res)
     this.nz = Math.round((HB.z1 - HB.z0) / res)
     this.h = new Float32Array((this.nx + 1) * (this.nz + 1))
-    for (let j = 0; j <= this.nx; j++) for (let i = 0; i <= this.nz; i++) this.h[j * (this.nz + 1) + i] = terrainHeight(HB.x0 + j * res, HB.z0 + i * res)
+    this.road = new Float32Array((this.nx + 1) * (this.nz + 1))
+    for (let j = 0; j <= this.nx; j++) {
+      for (let i = 0; i <= this.nz; i++) {
+        const [h, w] = terrainSample(HB.x0 + j * res, HB.z0 + i * res)
+        this.h[j * (this.nz + 1) + i] = h
+        this.road[j * (this.nz + 1) + i] = w
+      }
+    }
   }
 
   at(lx: number, lz: number) {
+    return this.sample(this.h, lx, lz)
+  }
+
+  roadAt(lx: number, lz: number) {
+    return this.sample(this.road, lx, lz)
+  }
+
+  private sample(arr: Float32Array, lx: number, lz: number) {
     const fx = clamp((lx - HB.x0) / this.res, 0, this.nx - 0.001)
     const fz = clamp((lz - HB.z0) / this.res, 0, this.nz - 0.001)
     const j = Math.floor(fx)
@@ -194,10 +233,10 @@ export class HeightGrid {
     const u = fx - j
     const v = fz - i
     const w = this.nz + 1
-    const a = this.h[j * w + i]
-    const b = this.h[(j + 1) * w + i]
-    const c = this.h[j * w + i + 1]
-    const d = this.h[(j + 1) * w + i + 1]
+    const a = arr[j * w + i]
+    const b = arr[(j + 1) * w + i]
+    const c = arr[j * w + i + 1]
+    const d = arr[(j + 1) * w + i + 1]
     return lerp(lerp(a, b, u), lerp(c, d, u), v)
   }
 }

@@ -32,8 +32,13 @@ export class Environment {
   private shooting: { mesh: THREE.Mesh; t: number; dir: THREE.Vector3 } | null = null
   private nextMeteor = 6
   private clock = 0
+  /** mountain air: cooler, bluer haze by day */
+  private cool = false
+
+  private shadowsOn = true
 
   constructor(renderer: THREE.WebGLRenderer, private scene: THREE.Scene, shadowSize: number, shadows: boolean, skyUrl = '') {
+    this.shadowsOn = shadows
     this.sky.scale.setScalar(10000)
     this.scene.add(this.sky)
     this.envSky.scale.setScalar(10000)
@@ -54,10 +59,10 @@ export class Environment {
     this.sun.castShadow = shadows
     this.sun.shadow.mapSize.set(shadowSize, shadowSize)
     const c = this.sun.shadow.camera
-    c.left = -70
-    c.right = 70
-    c.top = 70
-    c.bottom = -70
+    c.left = -55
+    c.right = 55
+    c.top = 55
+    c.bottom = -55
     c.near = 1
     c.far = 600
     this.sun.shadow.bias = -0.0002
@@ -184,6 +189,11 @@ export class Environment {
     return this.mode === 'dawn' ? 1 : this.mode === 'golden' ? 0.5 : 0
   }
 
+  setCool(on: boolean) {
+    this.cool = on
+    this.setTime(this.mode)
+  }
+
   setFogDensity(d: number) {
     ;(this.scene.fog as THREE.FogExp2).density = d
   }
@@ -198,6 +208,8 @@ export class Environment {
 
   setTime(mode: TimeMode) {
     this.mode = mode
+    // moonlight shadows are too faint to be worth a second render of the scene
+    this.sun.castShadow = this.shadowsOn && mode !== 'night'
     if (mode === 'day') {
       this.night = 0
       this.setSun(28, 235)
@@ -256,6 +268,7 @@ export class Environment {
     this.sun.intensity = 0.8 + low * 1.9
     // warm dusty haze close to the ground, the way Kolkata afternoons look
     ;(this.scene.fog as THREE.FogExp2).color.setRGB(0.78, 0.72 - (1 - low) * 0.05, 0.62 - (1 - low) * 0.12)
+    if (this.cool) (this.scene.fog as THREE.FogExp2).color.lerp(new THREE.Color(0.7, 0.8, 0.93), 0.75 * low)
     this.envTarget?.dispose()
     this.envTarget = this.pmrem.fromScene(this.envScene, 0.02)
     this.scene.environment = this.envTarget.texture

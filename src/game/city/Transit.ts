@@ -303,7 +303,10 @@ export class Transit {
     this.group.add(deck)
     deck.updateMatrixWorld(true)
     physics.fixedMesh(deck)
-    const surface = new THREE.Mesh(sweep(path.map((p) => p.clone().setY(p.y + 0.03)), [[-W / 2, 0], [W / 2, 0]], false), m.asphalt)
+    // the asphalt is two-sided: a sweep's winding depends on which way the road runs
+    const asphalt = (m.asphalt as THREE.MeshStandardMaterial).clone()
+    asphalt.side = THREE.DoubleSide
+    const surface = new THREE.Mesh(sweep(path.map((p) => p.clone().setY(p.y + 0.03)), [[-W / 2, 0], [W / 2, 0]], false), asphalt)
     surface.receiveShadow = true
     this.group.add(surface)
     // lane markings on the surface

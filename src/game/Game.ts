@@ -154,6 +154,9 @@ export class Game {
       s.intensity = driving && this.env.night > 0.3 ? 70 * this.env.night : 0
       if (driving && s.parent !== driving.root) driving.root.add(s, s.target)
     }
+    // cars parked far away are not drawn (the supercars alone are hundreds of thousands of triangles)
+    const showCars = this.engine.quality.tier === 'high' ? 240 : this.engine.quality.tier === 'mid' ? 170 : 120
+    for (const v of this.vehicles) v.root.visible = v === p.vehicle || Math.hypot(v.position.x - focus.x, v.position.z - focus.z) < showCars
     this.checkPortals(focus, dt)
     if (this.region === 'city') this.world.update(dt, t, focus)
     else this.hills.update(dt, t, this.engine.camera.position, focus, this.env.haze, this.env.alpenglow, this.env.night)
@@ -192,7 +195,8 @@ export class Game {
     this.engine.setAO(to === 'city')
     if (to === 'hills') {
       this.env.setSkyConditions(27.1, 1)
-      this.env.setFogDensity(0.0011)
+      this.env.setCool(true)
+      this.env.setFogDensity(0.00035)
       if (!this.hillsSeen) {
         // the first arrival is at first light, the way you would want to see it
         this.hillsSeen = true
@@ -202,6 +206,7 @@ export class Game {
     } else {
       this.env.setSkyConditions(22.6, 0.6)
       this.env.setFogDensity(0.0009)
+      this.env.setCool(false)
     }
     this.portalCool = 4
     this.onTransition?.('in', to)

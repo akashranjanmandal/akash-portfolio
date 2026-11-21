@@ -218,7 +218,7 @@ export class WorldMap {
     // you
     c.save()
     c.translate(PX(s.player.x), PZ(s.player.z))
-    c.rotate(-s.player.yaw + Math.PI)
+    c.rotate(-s.player.yaw)
     c.fillStyle = '#ff4d6d'
     c.strokeStyle = '#fff'
     c.lineWidth = 2 * dpr

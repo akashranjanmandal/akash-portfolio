@@ -10,6 +10,8 @@ import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
 import { buildPortal } from './hills/Portal'
 import { Transit } from './city/Transit'
+import { ChunkedTerrain, terrainMaterial, microDetail } from './Terrain'
+import { smoothstep } from '../utils/math'
 import { Landmarks } from './city/Landmarks'
 import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt } from './city/Plan'
 
@@ -43,6 +45,13 @@ function groundAt(x: number, z: number) {
   if (hz < 40) {
     const t = Math.min(1, Math.max(0, (hz - 24) / 14))
     return -0.08 * (1 - t) + g * t
+  }
+  // the flyover's ground-level start sits just under the road surface, so the grass never grows through it
+  if (x > 165 && x < 310 && z > -315 && z < -198) {
+    const dx = Math.max(0, 180 - x, x - 295)
+    const dz = Math.max(0, -300 - z, z + 205)
+    const t = Math.min(1, Math.max(0, (Math.hypot(dx, dz) - 4) / 16))
+    return -0.3 * (1 - t) + g * t
   }
   // the flyover's east end and its platform stand on a levelled pad beside the Bypass
   if (x > 400 && x < 560 && z > -340 && z < -230) {
@@ -185,7 +194,7 @@ export class World {
     this.traffic.park(kerbSpots(PLOTS.map((p) => plotFrame(p)), 14), this.physics)
     this.group.add(this.traffic.group)
     this.group.add(this.howrah.group)
-    this.landmarks = new Landmarks(this.physics, this.town.mats, this.assets.images, this.assets.models)
+    this.landmarks = new Landmarks(this.physics, this.town.mats, this.assets.images, this.assets.models, this.quality.tier === 'high' ? 4 : this.quality.tier === 'mid' ? 3 : 2)
     this.landmarks.build()
     for (const s of SIGHTS) this.landmarks.spots.push({ id: s.id, title: s.label, sub: s.sub, pos: new THREE.Vector3(s.x, 0, s.z), yaw: 0 })
     this.group.add(this.landmarks.group)
@@ -194,7 +203,7 @@ export class World {
     for (const g of [this.town.group, this.landmarks.group]) {
       for (const o of g.children) {
         const m = o as THREE.Mesh
-        if (!m.isMesh || (m as THREE.InstancedMesh).isInstancedMesh) continue
+        if (!m.isMesh) continue
         m.updateMatrixWorld(true)
         if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere()
         const bs = m.geometry.boundingSphere!
@@ -207,57 +216,17 @@ export class World {
     this.scatter()
   }
 
-  private buildTerrain() {
-    const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG).rotateX(-Math.PI / 2)
-    const pos = geo.attributes.position as THREE.BufferAttribute
-    for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)))
-    geo.computeVertexNormals()
+  private terrain!: ChunkedTerrain
 
-    const grass = this.assets.textures.get('aerial_grass_rock')
-    const rock = this.assets.textures.get('rocky_terrain_02')
-    const sand = this.assets.textures.get('coast_sand_rocks_02')
-    const mat = new THREE.MeshStandardMaterial({ roughness: 1, map: grass?.map ?? null, normalMap: grass?.normalMap ?? null, roughnessMap: grass?.roughnessMap ?? null })
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.tRock = { value: rock?.map }
-      shader.uniforms.tSand = { value: sand?.map }
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
-        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);')
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>
-          varying vec3 vWPos; varying vec3 vWNrm;
-          uniform sampler2D tRock; uniform sampler2D tSand;
-          float h21(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
-          float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-            return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }`)
-        .replace('#include <map_fragment>', `
-          vec2 uvW = vWPos.xz / 7.0;
-          // two scales of the same texture hide the tiling
-          vec3 g1 = texture2D(map, uvW).rgb;
-          vec3 g2 = texture2D(map, uvW * 0.23 + 0.37).rgb;
-          vec3 grassC = mix(g1, g2, 0.45);
-          float macro = vn(vWPos.xz * 0.012) * 0.6 + vn(vWPos.xz * 0.05) * 0.4;
-          grassC *= mix(0.78, 1.12, macro);
-          vec3 rockC = texture2D(tRock, vWPos.xz / 9.0).rgb;
-          vec3 sandC = texture2D(tSand, vWPos.xz / 6.0).rgb;
-          float slope = 1.0 - clamp(vWNrm.y, 0.0, 1.0);
-          float rockW = smoothstep(0.18, 0.35, slope) + smoothstep(18.0, 38.0, vWPos.y) * 0.6;
-          float sandW = 1.0 - smoothstep(-0.6, 1.4, vWPos.y);
-          vec3 col = mix(grassC, rockC, clamp(rockW, 0.0, 1.0));
-          col = mix(col, sandC, sandW);
-          diffuseColor.rgb *= col;`)
-        .replace('#include <normal_fragment_maps>', `
-          vec3 mapN = texture2D( normalMap, vWPos.xz / 7.0 ).xyz * 2.0 - 1.0;
-          mapN.xy *= normalScale;
-          normal = normalize( tbn * mapN );`)
-        .replace('#include <roughnessmap_fragment>', `float roughnessFactor = roughness;`)
+  private buildTerrain() {
+    // visible ground: chunks at three levels of detail, with a little micro-relief on the hills
+    const detailed = (x: number, z: number, detail: number) => {
+      const h = heightAt(x, z)
+      return h > 2 ? h + microDetail(x, z, detail * (0.2 + 0.9 * smoothstep(8, 50, h))) : h
     }
-    // the normal-map chunk above needs tangent-free TBN; give the material a valid normalScale
-    mat.normalScale.set(0.8, 0.8)
-    const mesh = new THREE.Mesh(geo, mat)
-    mesh.receiveShadow = true
-    mesh.name = 'terrain'
-    this.group.add(mesh)
+    this.terrain = new ChunkedTerrain({ x0: -SIZE / 2, z0: -SIZE / 2, x1: SIZE / 2, z1: SIZE / 2 }, 150, [{ cell: 3.75, dist: 230, detail: 1 }, { cell: 7.5, dist: 620, detail: 0.5 }, { cell: 18.75, dist: 1e9, detail: 0 }], detailed, terrainMaterial(this.assets, false))
+    this.group.add(this.terrain.group)
+    this.terrain.prime(new THREE.Vector3(SPAWN.x, 0, SPAWN.z))
 
     // heightfield collider (Rapier wants column-major heights)
     const n = SEG + 1
@@ -365,16 +334,17 @@ export class World {
     this.cullTimer -= dt
     if (this.cullTimer <= 0) {
       this.cullTimer = 0.25
-      const far = this.quality.tier === 'high' ? 340 : this.quality.tier === 'mid' ? 270 : 210
+      const far = this.quality.tier === 'high' ? 250 : this.quality.tier === 'mid' ? 190 : 140
       for (const e of this.cullables) e.m.visible = Math.hypot(e.c.x - player.x, e.c.z - player.z) - e.r < far
     }
+    this.terrain.update(player, dt)
     this.town.update(dt)
     this.transit.update(dt, this.night)
     this.town.tram?.setNight(this.night)
     const tram = this.town.tram?.group.position
     this.traffic.update(dt, player, tram ? [...this.obstacles, tram] : this.obstacles, this.night)
     this.forest?.update(player)
-    this.landmarks.update(t, this.night)
+    this.landmarks.update(t, this.night, player)
     this.howrah.update(this.night)
     this.fairy.update(t, this.night)
     this.town.setNight(this.night)

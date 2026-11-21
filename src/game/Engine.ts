@@ -30,8 +30,16 @@ export class Engine {
   readonly camera = new THREE.PerspectiveCamera(60, 1, 0.1, 6000)
   readonly quality: Quality
   readonly composer: EffectComposer
-  private ao: N8AOPostPass | null = null
+  ao: N8AOPostPass | null = null
   private ticks: Tick[] = []
+  private bloom: BloomEffect | null = null
+  /** the governor: resolution scale, and how many effects have been switched off (0 = all on) */
+  private scale = 1
+  private level = 0
+  private perfT = 0
+  private perfN = 0
+  private perfWarm = 3
+  private frameNo = 0
   private last = 0
   private elapsed = 0
   width = 1
@@ -49,6 +57,8 @@ export class Engine {
     this.renderer.toneMapping = THREE.NoToneMapping
     this.renderer.shadowMap.enabled = this.quality.shadows
     this.renderer.shadowMap.type = THREE.PCFShadowMap
+    // the sun shadow map is re-drawn every other frame: it barely moves, and it is a big share of the cost
+    this.renderer.shadowMap.autoUpdate = false
 
     this.composer = new EffectComposer(this.renderer, { frameBufferType: THREE.HalfFloatType })
     this.composer.addPass(new RenderPass(this.scene, this.camera))
@@ -62,7 +72,10 @@ export class Engine {
       this.composer.addPass(this.ao)
     }
     const effects = []
-    if (this.quality.bloom) effects.push(new BloomEffect({ intensity: 0.35, luminanceThreshold: 1.05, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.6 }))
+    if (this.quality.bloom) {
+      this.bloom = new BloomEffect({ intensity: 0.35, luminanceThreshold: 1.05, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.6 })
+      effects.push(this.bloom)
+    }
     effects.push(new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }))
     effects.push(new VignetteEffect({ offset: 0.4, darkness: 0.28 }))
     effects.push(new SMAAEffect())
@@ -74,7 +87,7 @@ export class Engine {
 
   /** ambient occlusion is a city luxury: the mountains are too far and too large for it */
   setAO(on: boolean) {
-    if (this.ao) this.ao.enabled = on
+    if (this.ao) this.ao.enabled = on && this.level < 1
   }
 
   resize() {
@@ -82,12 +95,48 @@ export class Engine {
     const h = Math.max(1, window.innerHeight)
     this.width = w
     this.height = h
-    const dpr = Math.min(window.devicePixelRatio || 1, this.quality.dprMax)
+    const dpr = Math.min(window.devicePixelRatio || 1, this.quality.dprMax) * this.scale
     this.renderer.setPixelRatio(dpr)
     this.renderer.setSize(w, h, false)
     this.composer.setSize(w, h, false)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+  }
+
+  /**
+   * Keeps the game smooth on any machine: if the frame rate sags, drop the render resolution a step,
+   * then switch off ambient occlusion, bloom and shadows one by one; when there is plenty of headroom, give resolution back.
+   */
+  private govern(dt: number) {
+    if (this.perfWarm > 0) {
+      this.perfWarm -= dt // loading and shader compiles are not the game's steady speed
+      return
+    }
+    this.perfT += dt
+    this.perfN++
+    if (this.perfT < 2) return
+    const fps = this.perfN / this.perfT
+    this.perfT = 0
+    this.perfN = 0
+    if (fps < 38) {
+      // cheapest-to-lose first: ambient occlusion (it draws the whole scene again), then resolution, bloom, shadows
+      if (this.level < 1) {
+        this.level = 1
+        if (this.ao) this.ao.enabled = false
+      } else if (this.scale > 0.6) {
+        this.scale = Math.max(0.6, this.scale * 0.85)
+        this.resize()
+      } else if (this.level < 2) {
+        this.level = 2
+        if (this.bloom) this.bloom.blendMode.opacity.value = 0
+      } else if (this.level < 3) {
+        this.level = 3
+        this.renderer.shadowMap.enabled = false
+      }
+    } else if (fps > 57 && this.scale < 1 && this.level <= 1) {
+      this.scale = Math.min(1, this.scale * 1.06)
+      this.resize()
+    }
   }
 
   onTick(fn: Tick) {
@@ -101,7 +150,9 @@ export class Engine {
       this.last = now
       this.elapsed += dt
       for (const fn of this.ticks) fn(dt, this.elapsed)
+      this.renderer.shadowMap.needsUpdate = (this.frameNo++ & 1) === 0
       this.composer.render(dt)
+      this.govern(dt)
     })
   }
 }
