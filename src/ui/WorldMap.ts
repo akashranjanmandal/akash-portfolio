@@ -1,4 +1,5 @@
-import { GRID, HIGHWAY, DISTRICTS } from '../game/city/Plan'
+import { drawTransit } from './TransitMap'
+import { GRID, HIGHWAY, DISTRICTS, EDEN } from '../game/city/Plan'
 import { ICONS, escapeHtml } from '../utils/dom'
 import { trapFocus } from './focus'
 
@@ -167,15 +168,19 @@ export class WorldMap {
       } else {
         c.fillStyle = d.kind === 'stadium' ? '#4f8f45' : '#b9ad94'
         if (d.kind === 'stadium') {
+          c.fillStyle = '#77816d'
+          c.fillRect(PX(d.cx - EDEN.half), PZ(d.cz - EDEN.half), 2 * EDEN.half * k, 2 * EDEN.half * k)
+          c.fillStyle = '#4f8f45'
           c.beginPath()
-          c.ellipse(PX(d.cx), PZ(d.cz), 38 * k, 35 * k, 0, 0, Math.PI * 2)
+          c.ellipse(PX(d.cx), PZ(d.cz), (EDEN.fieldX + 18) * k, (EDEN.fieldZ + 17) * k, 0, 0, Math.PI * 2)
           c.fill()
         } else c.fillRect(PX(d.cx - 41), PZ(d.cz - 41), 82 * k, 82 * k)
       }
     }
     // bridge
     c.fillStyle = '#8a8478'
-    c.fillRect(PX(-318), PZ(-6), 92 * k, 12 * k)
+    c.fillRect(PX(-332), PZ(-6), 120 * k, 12 * k)
+    drawTransit(c, PX, PZ)
   }
 
   private labels(c: CanvasRenderingContext2D, s: MapState, px: number, dpr: number, S: number, PX: (v: number) => number, PZ: (v: number) => number) {

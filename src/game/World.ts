@@ -10,11 +10,12 @@ import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
 import { buildPortal } from './hills/Portal'
 import { Transit } from './city/Transit'
+import { Pedestrians } from './city/Pedestrians'
 import { Ghat } from './city/Ghat'
 import { ChunkedTerrain, terrainMaterial, microDetail } from './Terrain'
 import { smoothstep } from '../utils/math'
 import { Landmarks } from './city/Landmarks'
-import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt, railDist, laneDist } from './city/Plan'
+import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt, railDist, laneDist, metroClearance, inEden } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -128,12 +129,14 @@ export class World {
   fairy!: FairyLights
   transit!: Transit
   ghat!: Ghat
+  pedestrians!: Pedestrians
   /** positions the traffic should brake for besides the player (e.g. the player's taxi) */
   obstacles: THREE.Vector3[] = []
   night = 0
   private lampGlow!: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>
   private lampLights: THREE.PointLight[] = []
   private lampTimer = 0
+  private lightPositions: THREE.Vector3[] = []
   /** static chunks that are switched off beyond the draw distance */
   private cullables: { m: THREE.Mesh; c: THREE.Vector3; r: number }[] = []
   private cullTimer = 0
@@ -201,6 +204,7 @@ export class World {
     this.group.add(this.landmarks.group)
     this.transit = new Transit(this.physics, this.town.mats)
     this.group.add(this.transit.group)
+    this.lightPositions = [...this.town.lampPositions.map(p => p.clone().setY(5.6)), ...this.transit.lightPositions]
     this.ghat = new Ghat(this.physics, this.town.mats)
     this.group.add(this.ghat.group)
     for (const g of [this.town.group, this.landmarks.group]) {
@@ -217,6 +221,11 @@ export class World {
     this.fairy = new FairyLights({ pos: [...this.town.fairyBuf.pos, ...this.landmarks.fairy.pos], col: [...this.town.fairyBuf.col, ...this.landmarks.fairy.col] })
     this.group.add(this.fairy.points)
     this.scatter()
+  }
+
+  populate() {
+    this.pedestrians = new Pedestrians(this.physics, this.quality.tier === 'low')
+    this.group.add(this.pedestrians.group)
   }
 
   private terrain!: ChunkedTerrain
@@ -284,8 +293,9 @@ export class World {
     const offRoad = (x: number, z: number) => {
       if (riverDepth(x) > 0 || riverDepth(x - 6) > 0 || riverDepth(x + 6) > 0) return false
       if (x < -200 && Math.abs(z) < 12) return false
+      if (this.town.buildingClearances.some(o => Math.hypot(o.x - x, o.z - z) < o.r + 3)) return false
       if (Math.abs(x - STATION.x) < 26 && Math.abs(z - STATION.z) < 56) return false
-      if (districtAt(x, z)) return false
+      if (metroClearance(x, z, 7) || (x > 59 && x < 211 && z > 404 && z < 452) || districtAt(x, z)) return false
       if (z > -240 && z < -190) return false
       if (railDist(x, z) < 16) return false
       if (x > -234 && x < -196 && z > 140 && z < 240) return false
@@ -309,7 +319,7 @@ export class World {
       for (const cz of centres) {
         for (const t of [-23, 23]) {
           for (const [px, pz] of [[cx + t, cz + kerb], [cx + t, cz - kerb], [cx + kerb, cz + t], [cx - kerb, cz + t]]) {
-            if (r() < 0.45) continue
+            if (r() < 0.45 || inEden(px, pz) || metroClearance(px, pz, 6) || Math.min(Math.abs(px + 200), Math.abs(px - 400), Math.abs(pz + 200), Math.abs(pz - 400)) < 11) continue
             if (plots.some((p) => (p.x - px) ** 2 + (p.z - pz) ** 2 < (p.r + 2) ** 2)) continue
             const s = 1.05 + r() * 0.25
             avenue.push(new THREE.Matrix4().compose(new THREE.Vector3(px, 0.15, pz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * 6.28), new THREE.Vector3(s, s * 1.3, s)))
@@ -317,7 +327,7 @@ export class World {
         }
       }
     }
-    trees1.push(...avenue, ...this.town.districts.trees)
+    trees1.push(...avenue, ...this.town.districts.trees.filter(m => !metroClearance(m.elements[12], m.elements[14], 4) && railDist(m.elements[12], m.elements[14]) > 12))
     if (tree1 && tree2) {
       this.forest = new Forest(this.renderer, this.scene.environment, [tree1, tree2], [
         ...trees1.map((matrix) => ({ model: 0, matrix })),
@@ -344,7 +354,8 @@ export class World {
     }
     this.terrain.update(player, dt)
     this.town.update(dt)
-    this.transit.update(dt, this.night)
+    this.transit.update(dt, this.night, player)
+    this.pedestrians.update(dt, t, player)
     this.ghat.update(dt, this.night)
     this.town.tram?.setNight(this.night)
     const tram = this.town.tram?.group.position
@@ -359,12 +370,12 @@ export class World {
     this.lampTimer -= dt
     if (this.lampTimer <= 0) {
       this.lampTimer = 0.4
-      const near = lit ? [...this.town.lampPositions].sort((a, b) => a.distanceToSquared(player) - b.distanceToSquared(player)).slice(0, this.lampLights.length) : []
+      const near = lit ? [...this.lightPositions].sort((a, b) => a.distanceToSquared(player) - b.distanceToSquared(player)).slice(0, this.lampLights.length) : []
       this.lampLights.forEach((l, i) => {
         const p = near[i]
         // never toggle .visible on lights: it changes the light count and recompiles every shader
-        l.intensity = p ? 26 * this.night : 0
-        if (p) l.position.set(p.x, 5.6, p.z)
+        l.intensity = p ? (p.y > 10 ? 48 : 26) * this.night : 0
+        if (p) l.position.copy(p)
       })
     }
     const n = (this.sea.material as THREE.MeshStandardMaterial).normalMap

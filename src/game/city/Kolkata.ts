@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RAPIER, type Physics } from '../Physics'
 import { Batch, M } from './Batch'
 import type { Materials } from './Town'
-import { GRID, ROAD_W, PLOTS, plotFrame } from './Plan'
+import { GRID, ROAD_W, PLOTS, plotFrame, metroClearance, inEden } from './Plan'
 import { rng } from '../../utils/math'
 
 /* ──────────────────────────────────────────────────────────────
@@ -275,8 +275,9 @@ export function streetLife(b: Batch, m: Materials, physics: Physics) {
     for (let j = 0; j < GRID.length - 1; j++) {
       const cx = (GRID[i] + GRID[i + 1]) / 2
       const cz = (GRID[j] + GRID[j + 1]) / 2
+      if (inEden(cx, cz)) continue
       // a red pillar box on every other block corner
-      if ((i + j) % 2 === 0) {
+      if ((i + j) % 2 === 0 && !metroClearance(cx + edge - 3, cz + edge, 1)) {
         const x = cx + edge - 3
         const z = cz + edge
         b.add(new THREE.CylinderGeometry(0.32, 0.34, 1.3, 16), red, M(x, 0.8, z))
@@ -289,7 +290,7 @@ export function streetLife(b: Batch, m: Materials, physics: Physics) {
       if (r() < 0.55) {
         const x = cx - edge + 2.4
         const z = cz + (r() - 0.5) * 50
-        if (PLOTS.some((p) => { const f = plotFrame(p); return Math.hypot(f.x - x, f.z - z) < 12 })) continue
+        if (metroClearance(x, z, 2) || PLOTS.some((p) => { const f = plotFrame(p); return Math.hypot(f.x - x, f.z - z) < 12 })) continue
         b.box(1.8, 1.0, 0.9, tin, M(x, 0.65, z))
         for (const [dx, dz] of [[-0.85, -0.4], [0.85, -0.4], [-0.85, 0.4], [0.85, 0.4]]) b.box(0.05, 2.3, 0.05, black, M(x + dx, 1.3, z + dz))
         b.box(2.4, 0.04, 1.6, blue, M(x, 2.4, z).multiply(new THREE.Matrix4().makeRotationX(0.12)))
@@ -324,8 +325,8 @@ export function victoriaMemorial(b: Batch, m: Materials, physics: Physics) {
   b.box(14, 0.06, 40, road, at(0, 0.03, 26))
   const water = new THREE.MeshStandardMaterial({ color: '#4b6f7c', roughness: 0.05, metalness: 0.3 })
   for (const sx of [-1, 1]) {
-    b.box(8, 0.05, 36, water, at(sx * 16, 0.04, 28))
-    b.box(8.6, 0.25, 36.6, marble, at(sx * 16, 0.0, 28))
+    b.box(7.9, 0.04, 25, water, at(sx * 16, 0.18, 31))
+    b.box(8.6, 0.25, 25.8, marble, at(sx * 16, 0.035, 31))
   }
   // plinth and steps
   b.box(76, 1.2, 44, marble, at(0, 0.6, -6), 4)
@@ -343,6 +344,39 @@ export function victoriaMemorial(b: Batch, m: Materials, physics: Physics) {
   // arcade of columns across the front
   for (let i = 0; i < 13; i++) b.add(new THREE.CylinderGeometry(0.55, 0.6, 8, 14), marble, at(-21 + i * 3.5, 5.2, 9.6))
   b.box(46, 1.4, 2, marble, at(0, 9.9, 9.6))
+  const recess = new THREE.MeshStandardMaterial({ color: '#475252', roughness: 0.72 })
+  const arch = new THREE.Shape()
+  arch.moveTo(-1.05, 0)
+  arch.lineTo(1.05, 0)
+  arch.lineTo(1.05, 2.1)
+  arch.absarc(0, 2.1, 1.05, 0, Math.PI, false)
+  arch.closePath()
+  const window = new THREE.ShapeGeometry(arch)
+  for (const side of [-1, 1]) {
+    const faceZ = side > 0 ? 9.03 : -21.03
+    for (let k = -5; k <= 5; k++) {
+      const wx = k * 3.5
+      for (const wy of [2.1, 8.6]) {
+        b.add(window, recess, at(wx, wy, faceZ, side > 0 ? 0 : Math.PI))
+        b.box(0.11, 2.65, 0.13, marble, at(wx, wy + 1.32, faceZ + side * 0.06))
+        b.box(2.38, 0.19, 0.42, marble, at(wx, wy, faceZ))
+      }
+    }
+    for (const h of [2.1, 7.6, 12.9]) b.box(65, 0.34, 0.68, marble, at(0, h, faceZ))
+    for (const dx of [-27, 27]) for (const off of [-3, 0, 3]) {
+      for (const h of [3.1, 10.2]) b.add(window, recess, at(dx + off, h, -6 + side * 16.08, side > 0 ? 0 : Math.PI))
+    }
+  }
+  const pediment = new THREE.Shape()
+  pediment.moveTo(-9.4, 0)
+  pediment.lineTo(9.4, 0)
+  pediment.lineTo(0, 4)
+  pediment.closePath()
+  b.add(new THREE.ExtrudeGeometry(pediment, { depth: 3.7, bevelEnabled: false }), marble, at(0, 12.3, 9.1))
+  for (const dx of [-8.2, -5.1, 5.1, 8.2]) {
+    b.add(new THREE.CylinderGeometry(0.52, 0.72, 10.4, 16), marble, at(dx, 6.5, 12.2))
+    b.box(1.6, 0.55, 1.6, marble, at(dx, 11.85, 12.2))
+  }
   // central drum, dome, lantern and the figure on top
   b.add(new THREE.CylinderGeometry(12, 12.5, 8, 40), marble, at(0, 17, -6))
   for (let i = 0; i < 24; i++) {
@@ -356,8 +390,14 @@ export function victoriaMemorial(b: Batch, m: Materials, physics: Physics) {
   b.add(new THREE.SphereGeometry(2.1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), marble, at(0, 37.5, -6))
   const bronze = new THREE.MeshStandardMaterial({ color: '#2f3b33', metalness: 0.8, roughness: 0.45 })
   b.add(new THREE.CylinderGeometry(0.3, 0.6, 3, 10), bronze, at(0, 41, -6))
-  b.box(3.4, 0.25, 0.6, bronze, at(0, 41.6, -6))
-  physics.fixedBox(x, 1.2, z - 6, 38, 1.2, 22)
+  b.add(new THREE.SphereGeometry(0.4, 12, 10), bronze, at(0, 42.7, -6))
+  for (const side of [-1, 1]) {
+    const wing = new THREE.SphereGeometry(1, 12, 8).scale(0.42, 1.45, 0.14).rotateZ(-side * 0.62)
+    b.add(wing, bronze, at(side * 0.74, 42.25, -6.25))
+  }
+  b.add(new THREE.ConeGeometry(0.35, 1.4, 12).rotateZ(-Math.PI / 2), bronze, at(1.05, 42.52, -5.94))
+  physics.fixedBox(x, 0.6, z - 6, 38, 0.6, 22)
+  for (let i = 0; i < 4; i++) physics.fixedBox(x, 0.15 + i * 0.3, z + 17 - i * 0.9, 15 - i, 0.15, 2)
   physics.fixedBox(x, 9, z - 6, 33, 9, 16)
   // the asphalt approach needs a floor (terrain is right below it)
   physics.fixedBox(x, -0.2, z + 60, 5, 0.22, 35)

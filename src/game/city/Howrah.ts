@@ -13,7 +13,7 @@ import { RAIL_GAPS, GHAT } from './Plan'
 ────────────────────────────────────────────────────────────── */
 
 export const RIVER = { x: -272, half: 32, bank: 9 }
-export const BRIDGE = { x0: -236, x1: -308, half: 6.2 }
+export const BRIDGE = { x0: -212, x1: -332, half: 6.2 }
 export const STATION = { x: -372, z: 0 }
 
 /** depth of the river bed at x (0 outside the river) */
@@ -39,21 +39,20 @@ export class Howrah {
 
   constructor(physics: Physics, m: Materials) {
     const { x0, x1, half } = BRIDGE
-    const tA = RIVER.x + 18
-    const tB = RIVER.x - 18
-    // top chord: low at the anchors, tall at the towers, dipping over the suspended span
-    const top = new THREE.SplineCurve([
-      new THREE.Vector2(x0, 2.5), new THREE.Vector2(tA + 8, 12), new THREE.Vector2(tA, 26), new THREE.Vector2(tA - 9, 18),
-      new THREE.Vector2(RIVER.x, 15), new THREE.Vector2(tB + 9, 18), new THREE.Vector2(tB, 26), new THREE.Vector2(tB - 8, 12), new THREE.Vector2(x1, 2.5),
-    ])
-    const lut: THREE.Vector2[] = []
-    for (let i = 0; i <= 400; i++) lut.push(top.getPoint(i / 400))
-    const yTop = (x: number) => lut.reduce((b, p) => (Math.abs(p.x - x) < Math.abs(b.x - x) ? p : b)).y
-
+    const tA = RIVER.x + 32
+    const tB = RIVER.x - 32
+    // Straight chords transfer the suspended centre span to the two riverbank towers.
+    const profile = [[0, 9], [16, 11.5], [28, 20], [33, 18.5], [48, 10.3], [72, 10.3], [87, 18.5], [92, 20], [104, 11.5], [120, 9]]
+    const yTop = (x: number) => {
+      const d = x0 - x
+      const i = Math.max(1, profile.findIndex(([at]) => at >= d))
+      const [a, y] = profile[i - 1], [b, h] = profile[i]
+      return y + (h - y) * THREE.MathUtils.clamp((d - a) / (b - a), 0, 1)
+    }
     const parts: THREE.BufferGeometry[] = []
     const lightPts: number[] = []
     const xs: number[] = []
-    for (let x = x0; x >= x1 - 0.01; x -= 2.4) xs.push(x)
+    for (let x = x0; x >= x1 - 0.01; x -= 4) xs.push(x)
     const deckY = 0.7
     for (const side of [-1, 1]) {
       const z = side * half
@@ -76,9 +75,8 @@ export class Howrah {
         if (i % 2 === 0) lightPts.push(x, yt + 0.5, z)
       }
       for (const tx of [tA, tB]) {
-        parts.push(strut(new THREE.Vector3(tx, 26, z), new THREE.Vector3(tx, 30, z), 0.8))
-        parts.push(new THREE.ConeGeometry(0.7, 1.8, 4).translate(tx, 30.9, z).toNonIndexed())
-        lightPts.push(tx, 32, z)
+        for (const d of [-1, 1]) parts.push(strut(new THREE.Vector3(tx + d * 3.6, 0.6, z), new THREE.Vector3(tx + d * 0.8, 20.2, z), 0.65))
+        lightPts.push(tx, 20.6, z)
       }
     }
     // portal bracing over the road wherever it clears a bus
@@ -86,14 +84,14 @@ export class Howrah {
       const yt = yTop(x)
       if (yt < 8) continue
       parts.push(strut(new THREE.Vector3(x, yt, -half), new THREE.Vector3(x, yt, half), 0.24))
-      if (Math.round((x - x0) / 2.4) % 2 === 0) {
-        parts.push(strut(new THREE.Vector3(x, yt, -half), new THREE.Vector3(x - 2.4, yTop(x - 2.4), half), 0.12))
+      if (Math.round((x - x0) / 4) % 2 === 0) {
+        parts.push(strut(new THREE.Vector3(x, yt, -half), new THREE.Vector3(x - 4, yTop(x - 4), half), 0.12))
       }
     }
     for (const tx of [tA, tB]) {
-      for (const y of [14, 20, 25.5]) parts.push(strut(new THREE.Vector3(tx, y, -half), new THREE.Vector3(tx, y, half), 0.7))
-      parts.push(strut(new THREE.Vector3(tx, 14, -half), new THREE.Vector3(tx, 25.5, half), 0.35))
-      parts.push(strut(new THREE.Vector3(tx, 14, half), new THREE.Vector3(tx, 25.5, -half), 0.35))
+      for (const y of [10, 15, 20]) parts.push(strut(new THREE.Vector3(tx, y, -half), new THREE.Vector3(tx, y, half), 0.7))
+      parts.push(strut(new THREE.Vector3(tx, 10, -half), new THREE.Vector3(tx, 20, half), 0.35))
+      parts.push(strut(new THREE.Vector3(tx, 10, half), new THREE.Vector3(tx, 20, -half), 0.35))
     }
     const steel = new THREE.MeshStandardMaterial({ color: '#7d8590', roughness: 0.55, metalness: 0.6 })
     const truss = new THREE.Mesh(mergeGeometries(parts.map((p) => { for (const k of Object.keys(p.attributes)) if (!['position', 'normal'].includes(k)) p.deleteAttribute(k); return p }))!, steel)
@@ -112,17 +110,23 @@ export class Howrah {
       b.box(len, 1.0, 0.08, m.rail, M(cx, 0.9, side * (half + 2.45)))
       for (const tx of [tA, tB]) b.box(4, 10, 4, m.concrete, M(tx, -5.5, side * half), 3)
     }
-    // tram rails continue across
-    const rail = new THREE.MeshStandardMaterial({ color: '#8a8b8f', metalness: 0.9, roughness: 0.35 })
-    for (const z of [-0.72, 0.72]) b.box(len, 0.04, 0.08, rail, M(cx, 0.26, z))
-    // approach roads on both banks
-    b.box(32, 0.04, 10, m.asphalt, M(-221, 0.03, 0), 6)
-    b.box(64, 0.04, 10, m.asphalt, M(-340, 0.03, 0), 6)
+    for (let x = x1 + 4; x < x0; x += 8) {
+      b.box(3.3, 0.02, 0.12, m.line, M(x, 0.25, 0))
+      for (const side of [-1, 1]) {
+        b.box(0.08, 1.05, 0.08, m.rail, M(x, 0.94, side * (half + 2.45)))
+        b.box(0.34, 0.38, 2.9, m.frame, M(x, 0, side * (half + 1.4)))
+      }
+    }
+    for (const [a, c] of [[x0, -205], [-362, x1]]) {
+      b.box(c - a, 0.04, 10, m.asphalt, M((a + c) / 2, 0.03, 0), 6)
+      for (const side of [-1, 1]) b.box(c - a, 0.22, 2.2, m.pavement, M((a + c) / 2, 0.1, side * (half + 1.4)))
+    }
     b.build(this.group)
 
     physics.fixedBox(cx, -0.25, 0, (len + 2) / 2, 0.45, half + 0.5)
     physics.fixedBox(cx, 0.2, 0, len / 2, 0.02, half + 2.5)
     for (const side of [-1, 1]) {
+      physics.fixedBox(cx, 0.32, side * (half + 1.4), len / 2, 0.125, 1.1)
       physics.fixedBox(cx, 1.5, side * (half + 2.45), len / 2, 1.5, 0.12)
       for (const tx of [tA, tB]) physics.fixedBox(tx, 4, side * half, 0.6, 4, 0.6)
     }

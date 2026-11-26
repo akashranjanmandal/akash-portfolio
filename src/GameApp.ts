@@ -1,3 +1,4 @@
+import { drawTransit } from './ui/TransitMap'
 import * as THREE from 'three'
 import { Game } from './game/Game'
 import { Loader } from './ui/Loader'
@@ -8,7 +9,7 @@ import { Toasts } from './ui/Toasts'
 import { AudioEngine } from './audio/AudioEngine'
 import { ICONS, storage } from './utils/dom'
 import { hasWebGL, isTouch } from './utils/device'
-import { PLOTS, GRID, HIGHWAY, DISTRICTS } from './game/city/Plan'
+import { PLOTS, GRID, HIGHWAY, DISTRICTS, EDEN } from './game/city/Plan'
 import { HB, HILLS_Z } from './game/hills/Route'
 import { clamp } from './utils/math'
 import type { Spot } from './game/city/Landmarks'
@@ -331,11 +332,14 @@ export class GameApp {
         g.beginPath()
         g.ellipse(P(d.cx), P(d.cz), P(23) - P(0), P(15) - P(0), 0, 0, Math.PI * 2)
         g.fill()
+      } else if (d.kind === 'stadium') {
+        g.fillRect(P(d.cx - EDEN.half), P(d.cz - EDEN.half), P(EDEN.half) - P(-EDEN.half), P(EDEN.half) - P(-EDEN.half))
       } else g.fillRect(P(d.cx - 41), P(d.cz - 41), P(41) - P(-41), P(41) - P(-41))
     }
     g.fillStyle = '#d8d2c6'
     g.fillRect(P(-400), P(-5), P(GRID[0] - 5) - P(-400), P(5) - P(-5))
     g.fillRect(P(-5), P(-330), P(5) - P(-5), P(GRID[0] - 5) - P(-330))
+    drawTransit(g, P, P)
     this.mapBg = bg
   }
 

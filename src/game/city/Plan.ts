@@ -9,17 +9,35 @@ import { rng } from '../../utils/math'
 
 export const GRID = [-200, -100, 0, 100, 200, 300, 400]
 /** the suburban railway circuit (double track, the near track is at the rectangle's edge): Howrah in the west, Sealdah in the south */
-export const RAIL_RECT = { x0: -396, x1: 418, z0: -400, z1: 456 }
+export const RAIL_RECT = { x0: -396, x1: 418, z0: -428, z1: 456 }
 /** where the circuit crosses the Hooghly (z ranges of the two rail bridges) */
-export const RAIL_GAPS: [number, number][] = [[-416, -392], [447, 471]]
-/** distance from (x, z) to the railway corridor (the outline of the circuit) */
+export const RAIL_GAPS: [number, number][] = [[RAIL_RECT.z0 - 15, RAIL_RECT.z0 + 9], [RAIL_RECT.z1 - 9, RAIL_RECT.z1 + 15]]
+export const RAIL_RADIUS = 68
+export const METRO = {
+  x: 300, y: 9.5, platformY: 10.48, offset: 2.1, z0: -96, z1: 390,
+  stations: [
+    { id: 'esplanade', z: -50, name: 'Esplanade', bengali: 'এসপ্ল্যানেড' },
+    { id: 'park-street', z: 150, name: 'Park Street', bengali: 'পার্ক স্ট্রিট' },
+    { id: 'maidan', z: 350, name: 'Maidan', bengali: 'ময়দান' },
+  ],
+}
+
+export function metroClearance(x: number, z: number, margin = 0) {
+  const dx = Math.abs(x - METRO.x)
+  return (dx < 5 + margin && z > METRO.z0 - margin && z < METRO.z1 + margin)
+    || (dx < 8.4 + margin && METRO.stations.some(s => z > s.z - 37 - margin && z < s.z + 42 + margin))
+}
+
 export function railDist(x: number, z: number) {
-  const cx = (RAIL_RECT.x0 + RAIL_RECT.x1) / 2
-  const cz = (RAIL_RECT.z0 + RAIL_RECT.z1) / 2
-  return Math.abs(Math.max(Math.abs(x - cx) - (RAIL_RECT.x1 - RAIL_RECT.x0) / 2, Math.abs(z - cz) - (RAIL_RECT.z1 - RAIL_RECT.z0) / 2))
+  const { x0, x1, z0, z1 } = RAIL_RECT
+  const dx = Math.max(x0 - x, x - x1) + RAIL_RADIUS
+  const dz = Math.max(z0 - z, z - z1) + RAIL_RADIUS
+  return Math.abs(Math.hypot(Math.max(dx, 0), Math.max(dz, 0)) + Math.min(Math.max(dx, dz), 0) - RAIL_RADIUS)
 }
 /** the riverside ghat on the east bank of the Hooghly (the embankment is cut for its steps) */
 export const GHAT = { z0: 150, z1: 230 }
+export const EDEN = { x: 200, z: 300, half: 95, fieldX: 66, fieldZ: 61 }
+export const inEden = (x: number, z: number) => Math.abs(x - EDEN.x) < EDEN.half && Math.abs(z - EDEN.z) < EDEN.half
 export const ROAD_W = 10
 export const WALK_W = 3.5
 /** the paved town: streets run to the west bank (x = -200) and out east and south to 400 */
@@ -102,9 +120,9 @@ export const SIGHTS = [
   { id: 'sarobar', label: 'Rabindra Sarobar', sub: 'Lakeside promenade', x: 250, z: 50 },
   { id: 'minar', label: 'Shaheed Minar Plaza', sub: 'Pedestrian esplanade', x: 250, z: -50 },
   { id: 'bypass', label: 'Eastern Bypass', sub: 'The highway', x: 450, z: 100 },
-  { id: 'eden', label: 'Eden Gardens', sub: 'The cricket cathedral', x: 150, z: 250 },
+  { id: 'eden', label: 'Eden Gardens', sub: 'The cricket cathedral', x: EDEN.x, z: EDEN.z - 81 },
   { id: 'sealdah', label: 'Sealdah terminal', sub: 'Suburban trains · level crossing', x: 135, z: 436 },
-  { id: 'esplanade', label: 'Esplanade metro', sub: 'Kolkata Metro, on the viaduct', x: 0, z: 100 },
+  ...METRO.stations.map(s => ({ id: s.id, label: s.name + ' metro', sub: 'Metro entrance · Gate 1', x: METRO.x - 6.6, z: s.z + 42 })),
   { id: 'ghat', label: 'Hooghly Ghat', sub: 'Steps to the river · ferries', x: -217, z: 190 },
   { id: 'flyover', label: 'Ring flyover', sub: 'High road round the whole city · ramp at the NW corner', x: -200, z: -204 },
 ]
@@ -117,9 +135,9 @@ export type DistrictKind = 'lake' | 'plaza' | 'stadium'
 export const DISTRICTS: { id: string; kind: DistrictKind; cx: number; cz: number; label: string; sub: string }[] = [
   { id: 'sarobar', kind: 'lake', cx: 250, cz: 50, label: 'Rabindra Sarobar', sub: 'Lakeside promenade' },
   { id: 'minar', kind: 'plaza', cx: 250, cz: -50, label: 'Shaheed Minar Plaza', sub: 'Pedestrian esplanade' },
-  { id: 'eden', kind: 'stadium', cx: 150, cz: 250, label: 'Eden Gardens', sub: 'The cricket cathedral' },
+  { id: 'eden', kind: 'stadium', cx: EDEN.x, cz: EDEN.z, label: 'Eden Gardens', sub: 'The cricket cathedral' },
 ]
-export const districtAt = (x: number, z: number) => DISTRICTS.find((d) => Math.abs(x - d.cx) < 50 && Math.abs(z - d.cz) < 50)
+export const districtAt = (x: number, z: number) => DISTRICTS.find((d) => d.kind === 'stadium' ? inEden(x, z) : Math.abs(x - d.cx) < 50 && Math.abs(z - d.cz) < 50)
 
 /* ── narrow lanes ───────────────────────────────────────────── */
 

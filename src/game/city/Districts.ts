@@ -3,7 +3,7 @@ import type { Physics } from '../Physics'
 import { Batch, M } from './Batch'
 import type { Materials } from './Town'
 import { addFairy, type FairyBuffer } from './Fairy'
-import { DISTRICTS, HIGHWAY } from './Plan'
+import { DISTRICTS, HIGHWAY, EDEN } from './Plan'
 import { SCALE } from '../Scale'
 import { rng } from '../../utils/math'
 import { labelTexture } from '../hills/Portal'
@@ -305,12 +305,12 @@ function plaza(c: Ctx, cx: number, cz: number) {
 
 function stadium(c: Ctx, cx: number, cz: number) {
   const { b, m, group, out } = c
-  const RX = 26 // the playing field's radii
-  const RZ = 21
+  const RX = EDEN.fieldX
+  const RZ = EDEN.fieldZ
   const ROWS = 22
   const rise = 0.5
-  const run = 0.55
-  b.box(2 * HALF, 0.03, 2 * HALF, m.paving, M(cx, CURB + 0.02, cz), 3)
+  const run = 0.75
+  b.box(2 * (EDEN.half - 3.5), 0.03, 2 * (EDEN.half - 3.5), m.paving, M(cx, CURB + 0.02, cz), 3)
 
   // the outfield, mown in broad stripes, with a rope, a 30-yard circle, the pitch and creases
   const cv = document.createElement('canvas')
@@ -336,7 +336,7 @@ function stadium(c: Ctx, cx: number, cz: number) {
     group.add(new THREE.Mesh(r, new THREE.MeshBasicMaterial({ color })))
   }
   ringLine(RX, RZ, 0.1, 0.006, '#f4f4ee')
-  ringLine(15, 12.5, 0.09, 0.008, '#e8ecdc')
+  ringLine(32, 27.4, 0.09, 0.008, '#e8ecdc')
   const clay = new THREE.MeshStandardMaterial({ color: '#c9b27c', roughness: 1 })
   b.box(20.1, 0.02, 3.05, clay, M(cx, CURB + 0.1, cz), 4)
   for (const s of [-1, 1]) {
@@ -353,6 +353,7 @@ function stadium(c: Ctx, cx: number, cz: number) {
     const a0 = (i / AD) * Math.PI * 2
     const a1 = ((i + 1) / AD) * Math.PI * 2
     const am = (a0 + a1) / 2
+    if (Math.abs(Math.cos(am)) < 0.08) continue
     const rr = 1.012
     const x = cx + Math.cos(am) * RX * rr
     const z = cz + Math.sin(am) * RZ * rr
@@ -408,6 +409,26 @@ function stadium(c: Ctx, cx: number, cz: number) {
     bowlMesh.updateMatrixWorld(true)
     c.physics.fixedMesh(bowlMesh)
   }
+  const seats: THREE.Matrix4[] = []
+  const colours: THREE.Color[] = []
+  const seatPalette = ['#566fa1', '#e4ebed', '#719bc0', '#c3a64c'].map(hex => new THREE.Color(hex))
+  for (let sector = 0; sector < SEC; sector++) {
+    const middle = (sector + 0.5) * 2 * Math.PI / SEC
+    if (gate(middle) || sector % 4 === 0) continue
+    for (let row = 0; row < ROWS; row++) {
+      if ((west(middle) && row < 15) || (east(middle) && row < 7)) continue
+      const count = Math.floor(Math.hypot(Math.sin(middle) * rx(row), Math.cos(middle) * rz(row)) * 2 * Math.PI / SEC / 0.54)
+      for (let seat = 0; seat < count; seat++) {
+        const a = (sector + (seat + 0.5) / count) * 2 * Math.PI / SEC
+        seats.push(M(cx + Math.cos(a) * rx(row + 0.72), CURB + (row + 1) * rise + 0.16, cz + Math.sin(a) * rz(row + 0.72), Math.atan2(Math.cos(a), Math.sin(a))))
+        colours.push(seatPalette[row % 7 === 6 ? 3 : Math.floor(sector / 4) % 3])
+      }
+    }
+  }
+  const chairs = new THREE.InstancedMesh(new THREE.BoxGeometry(0.42, 0.29, 0.085), new THREE.MeshStandardMaterial({ roughness: 0.73 }), seats.length)
+  seats.forEach((at, i) => { chairs.setMatrixAt(i, at); chairs.setColorAt(i, colours[i]) })
+  chairs.receiveShadow = true
+  group.add(chairs)
   // the facade: a tall wall of pale plaster ribs with rows of lit arched windows, a gap at each gate
   const wall = new THREE.MeshStandardMaterial({ color: '#d8d2c4', roughness: 0.9 })
   const rib = new THREE.MeshStandardMaterial({ color: '#b9b2a2', roughness: 0.9 })
@@ -502,11 +523,22 @@ function stadium(c: Ctx, cx: number, cz: number) {
   const lamp = new THREE.MeshStandardMaterial({ color: '#fffbe8', emissive: '#fff1c8', emissiveIntensity: 0.3 })
   out.glow.push({ mat: lamp, day: 0.3, night: 6 })
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    const fx = cx + sx * 37.5
-    const fz = cz + sz * 36.5
-    b.box(1.1, 44, 1.1, m.frame, M(fx, CURB + 22, fz), 1)
-    b.box(8.5, 5, 0.8, m.frame, M(fx, CURB + 45, fz, Math.atan2(sx, sz) + Math.PI), 1)
-    for (let k = -1; k <= 1; k++) for (let j = 0; j < 2; j++) b.box(2.2, 1.9, 0.22, lamp, M(fx - sx * 0.6 + k * 0.0, CURB + 44 + j * 2.1, fz - sz * 0.6 + k * 1.4, Math.atan2(-sx, -sz)), 1)
+    const fx = cx + sx * 68
+    const fz = cz + sz * 64
+    const yaw = Math.atan2(-sx, -sz)
+    let at = M(fx, CURB, fz, yaw)
+    for (let y = 0; y < 36; y += 4) {
+      const width = 2.8 - y * 0.043
+      for (const a of [-1, 1]) for (const d of [-1, 1]) {
+        b.box(0.19, 4.1, 0.19, m.frame, at.clone().multiply(M(a * width / 2, y + 2, d * width / 2)))
+        b.box(0.095, Math.hypot(4, width), 0.095, m.frame, at.clone().multiply(M(0, y + 2, d * width / 2)).multiply(new THREE.Matrix4().makeRotationZ(a * Math.atan2(width, 4))))
+      }
+    }
+    at = M(fx, CURB + 37.8, fz, yaw)
+    b.box(7.6, 4.2, 0.42, m.frame, at)
+    for (let k = -3; k <= 3; k++) for (let j = -1; j <= 1; j++) {
+      b.add(new THREE.CylinderGeometry(0.42, 0.48, 0.2, 10).rotateX(Math.PI / 2), lamp, at.clone().multiply(M(k, j * 1.17, 0.28)))
+    }
     c.physics.fixedCylinder(fx, CURB + 4, fz, 0.8, 8)
   }
   // a ring of floodlights along the roof edge
@@ -530,9 +562,28 @@ function stadium(c: Ctx, cx: number, cz: number) {
       c.physics.fixedBox(cx + dx, CURB + 1.3, cz + s * (rz(ROWS) + 4), 1.2, 1.3, 0.9)
     }
   }
+  const club = new THREE.Mesh(new THREE.PlaneGeometry(13, 1.25), new THREE.MeshStandardMaterial({ map: labelTexture(['DR B. C. ROY CLUB HOUSE'], '#173729', '#ffedc9', 1024, 128) }))
+  club.position.set(px + 7.24, CURB + 8.55, cz)
+  club.rotation.y = Math.PI / 2
+  group.add(club)
+  // A compact garden pavilion stands outside the north-east curve of the oval.
+  const gx = cx + 69, gz = cz - 78
+  const gold = new THREE.MeshStandardMaterial({ color: '#b58b41', metalness: 0.48, roughness: 0.48 })
+  b.box(7.2, 0.38, 7.2, m.paving, M(gx, CURB + 0.19, gz))
+  for (const dx of [-2.2, 2.2]) for (const dz of [-2.2, 2.2]) {
+    b.add(new THREE.CylinderGeometry(0.2, 0.27, 3.3, 10), m.wood, M(gx + dx, CURB + 2, gz + dz))
+    c.physics.fixedCylinder(gx + dx, CURB + 2, gz + dz, 0.26, 3.4)
+  }
+  for (let i = 0; i < 5; i++) {
+    const radius = 4.9 - i * 0.88
+    const y = CURB + 3.66 + i * 0.92
+    b.add(new THREE.CylinderGeometry(radius * 0.48, radius, 0.82, 4).rotateY(Math.PI / 4), m.wood, M(gx, y, gz))
+    b.add(new THREE.CylinderGeometry(radius, radius, 0.12, 4).rotateY(Math.PI / 4), gold, M(gx, y - 0.4, gz))
+  }
+  b.add(new THREE.ConeGeometry(0.42, 1.9, 12), gold, M(gx, CURB + 8.63, gz))
   nightLight(c, cx, CURB, cz, '#e8ffe0', 130, 56)
   for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]] as const) {
-    tree(c, cx + sx * 39.5, cz + sz * 39, 1.2)
+    tree(c, cx + sx * 81, cz + sz * 79, 1.2)
   }
 }
 

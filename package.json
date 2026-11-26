@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "assets": "node scripts/optimize-assets.mjs"
+    "assets": "node scripts/optimize-assets.mjs",
+    "test:city": "node scripts/test-city.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@gltf-transform/cli": "^4.5.1",
     "@types/three": "^0.186.0",
+    "playwright-core": "^1.65.1",
     "sharp": "^0.35.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"

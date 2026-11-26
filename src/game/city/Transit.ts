@@ -1,35 +1,19 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RAPIER, type Physics } from '../Physics'
 import { Batch, M } from './Batch'
-import { townBuilding, type Materials } from './Town'
+import type { Materials } from './Town'
 import { labelTexture } from '../hills/Portal'
-import { rng } from '../../utils/math'
-import { RING, ringPath, rampUp, rampDown } from './Flyover'
-import { GRID, RAIL_RECT } from './Plan'
-import { Loop, roundedLoop, offsetLoop, sweep } from './paths'
+import { buildCoach, type Coach } from './Coach'
+import { RING, SLIPS, rampWidth, ringPath, rampUp, rampDown } from './Flyover'
+import { GRID, RAIL_RECT, METRO } from './Plan'
+import { suburbanPath } from './RailLines'
+import { Loop, offsetLoop, sideNormal, sweep } from './paths'
 
-/* ──────────────────────────────────────────────────────────────
-   RAILWAYS
-   Everything here runs in a closed loop; nothing ends at a buffer stop.
-   The Kolkata Metro circles four blocks on a concrete viaduct above the
-   streets, with three stations you can climb to by stairs. The suburban
-   railway is a double-track circuit round the whole city: Howrah on
-   the west bank, over the Hooghly on two bridges, Sealdah in the south,
-   with a level crossing. Coaches follow the track one by one, so they
-   bend round the curves.
-────────────────────────────────────────────────────────────── */
-
-export const METRO = {
-  y: 9.5,
-  corners: [[-100, 100], [300, 100], [300, 300], [-100, 300]] as [number, number][],
-  r: 24,
-  stations: [[0, 100, 'ESPLANADE'], [200, 100, 'PARK STREET'], [100, 300, 'MAIDAN']] as [number, number, string][],
-}
 export const RAIL = {
   z1: RAIL_RECT.z1,
   z2: RAIL_RECT.z1 + 6,
   gap: 6,
-  r: 60,
   platformX: [40, 230] as [number, number],
   crossingX: 300,
   sealdah: 135,
@@ -38,7 +22,7 @@ export const RAIL = {
 type Glow = { mat: THREE.MeshStandardMaterial; day: number; night: number }
 
 type Train = {
-  cars: THREE.Group[]
+  cars: Coach[]
   bodies: RAPIER.RigidBody[]
   loop: Loop
   kind: 'metro' | 'rail'
@@ -54,6 +38,9 @@ type Train = {
   wait: number
   /** the stop just served, so a departing train does not stop there again */
   served: number
+  direction: number
+  nextStop: number
+  door: number
   /** arc length of the level crossing on this loop */
   cross: number
   windows: THREE.MeshStandardMaterial
@@ -69,6 +56,8 @@ export class Transit {
   private glow: Glow[] = []
   private arms: { pivot: THREE.Group; angle: number }[] = []
   private lamps: THREE.MeshStandardMaterial[] = []
+  readonly lightPositions: THREE.Vector3[] = []
+  private gates: THREE.Mesh[] = []
   private blink = 0
   /** called when the crossing bells ring: position of the crossing */
   onBell?: (pos: THREE.Vector3) => void
@@ -78,11 +67,14 @@ export class Transit {
 
   constructor(private physics: Physics, private m: Materials) {
     const b = new Batch()
-    const metroD = roundedLoop(METRO.corners, METRO.r, 4).map((p) => p.setY(METRO.y))
-    const metroA = new Loop(offsetLoop(metroD, -2.1))
-    const metroB = new Loop(offsetLoop(metroD, 2.1).reverse())
-    this.metro(b, metroD, metroA, metroB)
-    const railA = roundedLoop([[RAIL_RECT.x0, RAIL_RECT.z1], [RAIL_RECT.x1, RAIL_RECT.z1], [RAIL_RECT.x1, RAIL_RECT.z0], [RAIL_RECT.x0, RAIL_RECT.z0]], RAIL.r, 4)
+    const metroTracks = [-1, 1].map(side => {
+      const points = []
+      for (let z = METRO.z0; z < METRO.z1; z += 2) points.push(new THREE.Vector3(METRO.x + side * METRO.offset, METRO.y, z))
+      points.push(new THREE.Vector3(METRO.x + side * METRO.offset, METRO.y, METRO.z1))
+      return new Loop(points, false)
+    })
+    this.metro(b, metroTracks)
+    const railA = suburbanPath()
     const railB = offsetLoop(railA, RAIL.gap).reverse()
     this.railway(b, railA, railB)
     this.flyover(b)
@@ -91,19 +83,29 @@ export class Transit {
     const stopsOf = (loop: Loop, pts: [number, number][]) => pts.map(([x, z]) => loop.nearestS(x, z))
     const mk = (loop: Loop, kind: 'metro' | 'rail', coaches: number, len: number, top: number, stops: number[], at: number, y: number, cross: number) => {
       const t = this.makeTrain(coaches, len, kind)
+      stops = [...stops].sort((a, b) => a - b)
       Object.assign(t, { loop, top, stops, s: at * loop.length, y, cross })
+      t.nextStop = stops.findIndex(stop => stop > t.s)
+      if (t.nextStop < 0) t.nextStop = 0
       this.trains.push(t)
       for (const c of t.cars) this.group.add(c)
-      if (kind === 'rail') {
-        for (let i = 0; i < coaches; i++) {
-          const body = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, 2.2, 0))
-          this.physics.world.createCollider(RAPIER.ColliderDesc.cuboid(len / 2, 1.9, 1.4), body)
-          t.bodies.push(body)
-        }
+      for (let i = 0; i < coaches; i++) {
+        const at = loop.sample(t.s + t.total / 2 - len / 2 - i * (len + t.gap))
+        const yaw = Math.atan2(-at.dz, at.dx)
+        const rotation = new THREE.Quaternion().setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw)
+        const body = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(at.p.x, at.p.y + y + 2.05, at.p.z).setRotation(rotation))
+        this.physics.world.createCollider(RAPIER.ColliderDesc.cuboid(len / 2, 1.72, 1.56), body)
+        t.bodies.push(body)
       }
     }
-    const ms = METRO.stations.map(([x, z]) => [x, z] as [number, number])
-    for (const [loop, at] of [[metroA, 0.1], [metroA, 0.6], [metroB, 0.3], [metroB, 0.8]] as [Loop, number][]) mk(loop, 'metro', 3, 17, 17, stopsOf(loop, ms), at, 0.12, 0)
+    for (const [i, line] of metroTracks.entries()) {
+      const stops = METRO.stations.map(station => station.z - 8 - METRO.z0)
+      mk(line, 'metro', 3, 15, 16, stops, stops[i * 2] / line.length, 0.34, 0)
+      const train = this.trains[this.trains.length - 1]
+      train.direction = i === 0 ? 1 : -1
+      train.nextStop = 1
+      train.wait = 6
+    }
     const rA = new Loop(railA)
     const rB = new Loop(railB)
     const sealA = stopsOf(rA, [[RAIL.sealdah, RAIL.z1], [RAIL_RECT.x0, 0]])
@@ -112,19 +114,20 @@ export class Transit {
     const crossB = rB.nearestS(RAIL.crossingX, RAIL.z2)
     for (const at of [0.05, 0.55]) mk(rA, 'rail', 4, 20, 24, sealA, at, 0.3, crossA)
     for (const at of [0.3, 0.8]) mk(rB, 'rail', 4, 20, 24, sealB, at, 0.3, crossB)
+    this.update(0, 0)
   }
 
   /** ballast, two rails and sleepers along a closed path (y of the path is the ground the track sits on) */
-  private track(b: Batch, path: THREE.Vector3[]) {
+  private track(b: Batch, path: THREE.Vector3[], circuit = true) {
     const { m } = this
     const ballast = new THREE.MeshStandardMaterial({ color: '#59564f', roughness: 1, side: THREE.DoubleSide })
     const steel = new THREE.MeshStandardMaterial({ color: '#8a8d92', roughness: 0.4, metalness: 0.8 })
-    const closed = [...path, path[0].clone(), path[1].clone()]
-    const bed = new THREE.Mesh(sweep(closed, [[-2.7, 0], [-1.9, 0.2], [1.9, 0.2], [2.7, 0]], false), ballast)
+    const closed = circuit ? [...path, path[0]] : path
+    const bed = new THREE.Mesh(sweep(closed, [[2.02, 0], [1.65, 0.2], [-1.65, 0.2], [-2.02, 0]], false), ballast)
     bed.receiveShadow = true
     this.group.add(bed)
-    for (const o of [-0.72, 0.72]) this.group.add(new THREE.Mesh(sweep(closed, [[o - 0.06, 0.2], [o - 0.06, 0.36], [o + 0.06, 0.36], [o + 0.06, 0.2]]), steel))
-    const loop = new Loop(path)
+    for (const o of [-0.72, 0.72]) this.group.add(new THREE.Mesh(sweep(closed, [[o + 0.06, 0.2], [o + 0.06, 0.36], [o - 0.06, 0.36], [o - 0.06, 0.2]]), steel))
+    const loop = new Loop(path, circuit)
     const p = new THREE.Vector3()
     for (let s = 0; s < loop.length; s += 1.7) {
       const { dx, dz } = loop.sample(s, p)
@@ -134,102 +137,119 @@ export class Transit {
 
   /* ── the metro ────────────────────────────────────────────── */
 
-  private metro(b: Batch, D: THREE.Vector3[], A: Loop, B: Loop) {
-    const { m, physics } = this
-    const y = METRO.y
-    const W = 9
-    const closed = [...D, D[0].clone(), D[1].clone()]
-    const inStation = (p: THREE.Vector3) => METRO.stations.some(([sx, sz]) => Math.abs(p.x - sx) < 44 && Math.abs(p.z - sz) < 8)
-    const cmat = (m.concrete as THREE.MeshStandardMaterial).clone()
-    cmat.side = THREE.DoubleSide
-    // the viaduct: a box girder with parapets, and a flat platform slab (no parapet) where a station stands
-    let i0 = 0
-    for (let i = 1; i <= closed.length; i++) {
-      if (i < closed.length && inStation(closed[i]) === inStation(closed[i0])) continue
-      const run = closed.slice(Math.max(0, i0 - 1), Math.min(closed.length, i + 1))
-      if (run.length > 1) {
-        const sec: [number, number][] = inStation(closed[i0])
-          ? [[-W / 2 - 3.4, -1.4], [-W / 2 - 3.4, 0], [W / 2 + 3.4, 0], [W / 2 + 3.4, -1.4]]
-          : [[-W / 2 - 0.5, -1.4], [-W / 2 - 0.5, 0.9], [-W / 2, 0.9], [-W / 2, 0], [W / 2, 0], [W / 2, 0.9], [W / 2 + 0.5, 0.9], [W / 2 + 0.5, -1.4]]
-        const deck = new THREE.Mesh(sweep(run, sec), cmat)
-        deck.castShadow = deck.receiveShadow = true
-        this.group.add(deck)
-        deck.updateMatrixWorld(true)
-        physics.fixedMesh(deck)
-      }
-      i0 = i
-    }
-    // piers in the roadway: a column with a flared cap, set clear of every junction
-    const junction = (x: number, z: number) => GRID.some((gx) => GRID.some((gz) => Math.hypot(x - gx, z - gz) < 15))
-    D.forEach((p, i) => {
-      if (i % 6 !== 3 || junction(p.x, p.z)) return
-      const q = D[(i + 1) % D.length]
-      const yaw = Math.atan2(q.x - p.x, q.z - p.z)
-      b.box(1.7, y - 1.2, 1.7, m.concrete, M(p.x, (y - 1.2) / 2, p.z), 2)
-      b.box(7.5, 1.0, 2.6, m.concrete, M(p.x, y - 1.6, p.z, yaw), 2)
-      physics.fixedBox(p.x, (y - 1.2) / 2, p.z, 0.85, (y - 1.2) / 2, 0.85)
-    })
-    this.track(b, A.pts)
-    this.track(b, B.pts)
+  private board(b: Batch, x: number, y: number, z: number, yaw: number, w: number, h: number, lines: string[], bg = '#183e68', ink = '#ffffff') {
+    const map = labelTexture(lines, bg, ink, 768, 256, ink)
+    b.add(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map, roughness: 0.7, emissiveMap: map, emissive: '#ffffff', emissiveIntensity: 0.22 }), M(x, y, z, yaw))
+  }
 
-    // stations: a canopy on columns, name boards on both faces, lit strips, stairs down to the street at both ends
-    for (const [sx, sz, name] of METRO.stations) {
-      const len = 80
-      b.box(len, 0.35, 17, m.trim, M(sx, y + 4.6, sz), 2)
-      for (let k = -len / 2 + 3; k <= len / 2 - 3; k += 7) for (const s of [-1, 1]) b.box(0.4, 4.4, 0.4, m.frame, M(sx + k, y + 2.4, sz + s * 7.6), 1)
-      const lit = new THREE.MeshStandardMaterial({ color: '#fff6e0', emissive: '#ffe2b0', emissiveIntensity: 0.4 })
-      this.glow.push({ mat: lit, day: 0.4, night: 3.5 })
-      for (let k = -len / 2 + 6; k < len / 2 - 4; k += 8) for (const s of [-1, 0, 1]) b.box(5, 0.1, 0.4, lit, M(sx + k, y + 4.35, sz + s * 5), 1)
-      for (const s of [-1, 1]) {
-        const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.2), new THREE.MeshStandardMaterial({ map: labelTexture([name, 'KOLKATA METRO'], '#0a3d91', '#ffffff', 1024, 256, '#ffd23a'), roughness: 0.6, emissive: '#ffffff', emissiveIntensity: 0 }))
-        ;(sign.material as THREE.MeshStandardMaterial).emissiveMap = (sign.material as THREE.MeshStandardMaterial).map
-        this.glow.push({ mat: sign.material as THREE.MeshStandardMaterial, day: 0.05, night: 0.9 })
-        sign.position.set(sx, y + 3.3, sz + s * 8.6)
-        if (s < 0) sign.rotation.y = Math.PI
-        this.group.add(sign)
+  private metro(b: Batch, tracks: Loop[]) {
+    const { x, y, platformY: floor, z0, z1 } = METRO
+    const { m, physics } = this
+    const solid = (px: number, py: number, pz: number, w: number, h: number, d: number, mat: THREE.Material) => {
+      b.box(w, h, d, mat, M(px, py, pz))
+      physics.fixedBox(px, py, pz, w / 2, h / 2, d / 2)
+    }
+    const mid = (z0 + z1) / 2
+    solid(x, y - 0.65, mid, 8.3, 1.3, z1 - z0, m.concrete)
+    for (let z = z0 + 18; z < z1; z += 21) {
+      if (GRID.some(g => Math.abs(g - z) < 8)) continue
+      solid(x, (y - 1.3) / 2, z, 1.25, y - 1.3, 2, m.concrete)
+      b.box(7.7, 1, 2.4, m.concrete, M(x, y - 1.65, z))
+    }
+    const blue = new THREE.MeshStandardMaterial({ color: '#244d82', roughness: 0.58 })
+    const platformTile = (m.granite as THREE.MeshStandardMaterial).clone()
+    platformTile.emissive.set('#c2d8df')
+    platformTile.emissiveMap = platformTile.map
+    this.glow.push({ mat: platformTile, day: 0, night: 0.19 })
+    const strip = new THREE.MeshStandardMaterial({ color: '#e4e9e6', emissive: '#ffe8c8' })
+    this.glow.push({ mat: strip, day: 0.2, night: 2.3 })
+    const reader = new THREE.MeshStandardMaterial({ color: '#84ffad', emissive: '#2ec778', emissiveIntensity: 0.8 })
+    for (const [i, line] of tracks.entries()) {
+      this.track(b, line.pts, false)
+      const side = i === 0 ? -1 : 1
+      const px = x + side * 6.1
+      const trackX = x + side * METRO.offset
+      for (const z of [z0 + 1, z1 - 1]) solid(trackX, y + 0.8, z, 2.8, 0.9, 0.65, m.kerb)
+      let start = z0
+      for (const station of METRO.stations) {
+        const z = station.z
+        const lo = z - 35, hi = z + 17
+        solid(x + side * 4.03, y + 0.45, (start + lo) / 2, 0.24, 0.9, lo - start, m.concrete)
+        start = hi
+        solid(px, floor - 0.48, (lo + hi) / 2, 4.45, 0.96, hi - lo, platformTile)
+        b.box(0.25, 0.025, hi - lo, m.yellowLine, M(x + side * 4.32, floor + 0.015, (lo + hi) / 2))
+        for (let k = lo + 2; k < hi; k += 8) {
+          solid(x + side * 8, floor + 1.8, k, 0.2, 3.6, 0.2, m.frame)
+          b.box(0.2, 0.08, 4.4, strip, M(px, floor + 3.42, k + 1.8))
+          this.lightPositions.push(new THREE.Vector3(px, floor + 3.34, k + 1.8))
+          b.box(4.6, 0.18, 0.16, blue, M(px, floor + 3.52, k))
+        }
+        solid(x + side * 8.23, floor + 0.52, (lo + hi) / 2, 0.12, 1.04, hi - lo, m.rail)
+        b.box(4.65, 0.22, hi - lo + 1, m.corrugated, M(px, floor + 3.7, (lo + hi) / 2))
+        b.box(0.12, 0.42, hi - lo + 1, blue, M(x + side * 8.36, floor + 3.53, (lo + hi) / 2))
+        this.board(b, x + side * 8.43, floor + 3.02, z - 8, side * Math.PI / 2, 9, 1.65, [station.bengali, station.name.toUpperCase()])
+        this.board(b, x + side * 7.82, floor + 2, z - 16, -side * Math.PI / 2, 5, 1.1, [station.name, 'PLATFORM ' + (i + 1)])
+        for (const dz of [-24, -6]) {
+          solid(x + side * 7.45, floor + 0.42, z + dz, 0.58, 0.15, 2.6, m.wood)
+          for (const end of [-1, 1]) b.box(0.45, 0.36, 0.1, m.frame, M(x + side * 7.45, floor + 0.18, z + dz + end))
+        }
+        this.stairs(b, x + side * 6.65, hi, floor)
+        // Readers flank a 1.4 m accessible passage aligned with the stair centreline.
+        const gateX = x + side * 6.65
+        for (const dx of [-0.92, 0.92]) {
+          solid(gateX + dx, floor + 0.5, hi - 2.4, 0.38, 1, 1.5, m.frame)
+          b.box(0.25, 0.035, 0.34, reader, M(gateX + dx, floor + 1.02, hi - 2))
+          const flap = new THREE.Mesh(new THREE.BoxGeometry(0.67, 0.4, 0.08), blue)
+          flap.geometry.translate(-Math.sign(dx) * 0.335, 0, 0)
+          flap.position.set(gateX + dx - Math.sign(dx) * 0.18, floor + 0.65, hi - 2.4)
+          flap.userData.side = Math.sign(dx)
+          this.gates.push(flap)
+          this.group.add(flap)
+        }
+        const entry = hi + 22
+        for (const dx of [-1.38, 1.38]) solid(gateX + dx, 1.72, entry, 0.12, 3.16, 0.12, blue)
+        this.board(b, gateX, 3.2, entry + 0.08, 0, 3.15, 0.94, [station.name, 'METRO  ·  GATE ' + (i + 1)])
       }
-      for (const tz of [-4.2, 4.2]) b.box(len - 4, 0.04, 0.4, m.yellowLine, M(sx, y + 0.05, sz + tz), 1)
-      for (const tz of [-6.3, 6.3]) for (const k of [-20, 0, 20]) {
-        b.box(2.2, 0.08, 0.6, m.wood, M(sx + k, y + 0.5, sz + tz), 1)
-        physics.fixedBox(sx + k, y + 0.45, sz + tz, 1.1, 0.4, 0.3)
-      }
-      for (const s of [-1, 1]) {
-        b.box(len, 0.08, 0.08, m.rail, M(sx, y + 1.0, sz + s * 7.9), 1)
-        physics.fixedBox(sx, y + 0.5, sz + s * 7.9, len / 2, 0.5, 0.1)
-      }
-      this.stairs(b, sx + len / 2 + 10, sz + 6.2, 1)
-      this.stairs(b, sx - len / 2 - 10, sz + 6.2, -1)
+      solid(x + side * 4.03, y + 0.45, (start + z1) / 2, 0.24, 0.9, z1 - start, m.concrete)
     }
   }
 
-  /** a flight of stairs from the viaduct platform (top at x, z, height METRO.y) down to the street, running along +x or -x */
-  private stairs(b: Batch, xt: number, zt: number, dir: 1 | -1) {
-    const { m, physics } = this
-    const H = METRO.y
-    const n = 50
-    const rise = H / n
-    const run = 0.3
-    const Ls = n * run
-    // a flat landing between the platform's end and the top step, held up by a column
-    b.box(10, 0.4, 2.4, m.concrete, M(xt - dir * 5, H - 0.2, zt), 2)
-    physics.fixedBox(xt - dir * 5, H - 0.2, zt, 5, 0.2, 1.2)
-    b.box(0.6, H - 0.4, 0.6, m.concrete, M(xt - dir * 0.6, (H - 0.4) / 2, zt), 2)
-    for (let i = 0; i < n - 1; i++) {
-      const h = H - (i + 1) * rise
-      b.box(run, h, 2.4, m.concrete, M(xt + dir * (i + 0.5) * run, h / 2, zt), 2)
-    }
-    // the walkable surface is one smooth ramp, a touch below the tread tips
-    const ang = Math.atan2(H, Ls)
-    const ramp = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(Ls, H) + 1, 0.3, 2.4), m.concrete)
-    ramp.position.set(xt + (dir * Ls) / 2, H / 2 - rise * 0.5 - 0.15, zt)
-    ramp.rotation.z = -dir * ang
-    ramp.updateMatrixWorld(true)
-    physics.fixedMesh(ramp)
-    for (const s of [-1, 1]) {
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(Ls, H), 0.08, 0.08), m.rail)
-      rail.position.set(xt + (dir * Ls) / 2, H / 2 + 1.0, zt + s * 1.15)
-      rail.rotation.z = -dir * ang
-      this.group.add(rail)
+  private stairs(b: Batch, x: number, topZ: number, floor: number) {
+    const { physics, m } = this
+    const rise = (floor - 0.15) / 60
+    const tread = 0.32, width = 2.8
+    for (let flight = 0; flight < 3; flight++) {
+      const z = topZ + flight * (20 * tread + 1.45)
+      const y = floor - flight * 20 * rise
+      const length = 20 * tread
+      const slope = Math.atan2(20 * rise, length)
+      for (let i = 0; i < 20; i++) {
+        const stepY = y - (i + 1) * rise
+        b.box(width, 0.25, tread, m.concrete, M(x, stepY - 0.125, z + (i + 0.5) * tread))
+        b.box(width, 0.014, 0.055, m.yellowLine, M(x, stepY + 0.008, z + (i + 0.9) * tread))
+      }
+      const tilt = new THREE.Matrix4().makeRotationX(slope)
+      const span = Math.hypot(length, 20 * rise)
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.2, span), m.concrete)
+      slab.position.set(x, y - 10 * rise - 0.13, z + length / 2)
+      slab.rotation.x = slope
+      b.add(slab.geometry, m.concrete, M(x, slab.position.y - 0.14, slab.position.z).multiply(tilt))
+      physics.fixedMesh(slab)
+      for (const dx of [-1.34, 1.34]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, span), m.rail)
+        rail.position.set(x + dx, y - 10 * rise + 0.96, z + length / 2)
+        rail.rotation.x = slope
+        rail.updateMatrixWorld()
+        b.add(rail.geometry, m.rail, rail.matrixWorld)
+        physics.fixedMesh(rail)
+        for (const t of [0, 0.5, 1]) b.box(0.07, 1, 0.07, m.rail, M(x + dx, y - t * 20 * rise + 0.46, z + t * length))
+      }
+      if (flight === 2) continue
+      const ly = y - 20 * rise, lz = z + length + 0.725
+      b.box(width, 0.28, 1.45, m.concrete, M(x, ly - 0.14, lz))
+      physics.fixedBox(x, ly - 0.14, lz, width / 2, 0.14, 0.725)
+      b.box(0.48, ly - 0.28, 0.65, m.concrete, M(x, (ly - 0.28) / 2, lz))
+      for (const dx of [-1.34, 1.34]) b.box(0.07, 0.08, 1.45, m.rail, M(x + dx, ly + 0.96, lz))
     }
   }
 
@@ -272,11 +292,23 @@ export class Transit {
 
   private railway(b: Batch, A: THREE.Vector3[], B: THREE.Vector3[]) {
     const { m, physics } = this
-    const r = rng(77)
+
     const { z1, z2, platformX, crossingX } = RAIL
     const zc = (z1 + z2) / 2
     this.track(b, A)
     this.track(b, B)
+    const elevated = A.filter(p => p.y > 0.01)
+    const deck = new THREE.Mesh(sweep(elevated, [[8.2, -0.04], [-2.2, -0.04], [-2.2, -0.98], [8.2, -0.98]]), m.concrete)
+    this.group.add(deck)
+    physics.fixedMesh(deck)
+    elevated.forEach((p, i) => {
+      if (p.y < 1.3 || i % 7 || [-100, 100, 300].some(z => Math.abs(z - p.z) < 9)) return
+      const q = elevated[Math.min(i + 1, elevated.length - 1)]
+      const yaw = Math.atan2(q.x - p.x, q.z - p.z)
+      const px = p.x - 3 * Math.cos(yaw), pz = p.z + 3 * Math.sin(yaw)
+      b.box(1.6, p.y - 0.98, 2, m.concrete, M(px, (p.y - 0.98) / 2, pz, yaw))
+      physics.fixedBox(px, (p.y - 0.98) / 2, pz, 0.8, (p.y - 0.98) / 2, 1, yaw)
+    })
     // overhead wires: a portal gantry across both tracks every 48 m and two contact wires round the whole circuit
     const loopA = new Loop(A)
     const p = new THREE.Vector3()
@@ -285,57 +317,90 @@ export class Transit {
       const l = Math.hypot(dx, dz) || 1
       const nx = -dz / l
       const nz = dx / l
+      if (Math.abs(p.x - crossingX) < 6 && Math.abs(p.z - z1) < 10) continue
       for (const o of [-3.4, 9.4]) {
-        b.box(0.3, 7.6, 0.3, m.frame, M(p.x + nx * o, 3.8, p.z + nz * o), 1)
-        physics.fixedCylinder(p.x + nx * o, 1.5, p.z + nz * o, 0.2, 3)
+        b.box(0.3, 7.6, 0.3, m.frame, M(p.x + nx * o, p.y + 3.8, p.z + nz * o), 1)
+        physics.fixedCylinder(p.x + nx * o, p.y + 1.5, p.z + nz * o, 0.2, 3)
       }
-      b.box(0.15, 0.15, 13, m.frame, M(p.x + nx * 3, 7.2, p.z + nz * 3, Math.atan2(-dz, dx)), 1)
+      b.box(0.15, 0.15, 13, m.frame, M(p.x + nx * 3, p.y + 7.2, p.z + nz * 3, Math.atan2(-dz, dx)), 1)
     }
     const wire = new THREE.MeshStandardMaterial({ color: '#2b2b30', roughness: 0.6 })
     for (const path of [A, B]) this.group.add(new THREE.Mesh(sweep([...path, path[0].clone(), path[1].clone()], [[-0.03, 6.6], [-0.03, 6.66], [0.03, 6.66], [0.03, 6.6]]), wire))
 
     // Howrah: a platform on each side of the double track behind the station building, and its name on the back wall
-    this.platform(b, RAIL_RECT.x0 + 6.6, 0, 92, 7, 'z', -1)
-    this.platform(b, RAIL_RECT.x0 - RAIL.gap - 6.6, 0, 92, 7, 'z', 1)
+    this.platform(b, RAIL_RECT.x0 + 5.45, 0, 92, 7.2, 'z', -1)
+    this.platform(b, RAIL_RECT.x0 - RAIL.gap - 5.45, 0, 92, 7.2, 'z', 1)
     const howrah = new THREE.Mesh(new THREE.PlaneGeometry(20, 3.4), new THREE.MeshStandardMaterial({ map: labelTexture(['HOWRAH JUNCTION', 'Kolkata · since 1854'], '#7a1f12', '#fff4d6', 1024, 256, '#ffc61a'), roughness: 0.6 }))
     howrah.position.set(-383.2, 8.2, 0)
     howrah.rotation.y = -Math.PI / 2
     this.group.add(howrah)
-    // Sealdah's second platform, beside the far track
-    b.box(platformX[1] - platformX[0], 0.9, 6, m.concrete, M((platformX[0] + platformX[1]) / 2, 0.45, z2 + 6.6), 3)
-    physics.fixedBox((platformX[0] + platformX[1]) / 2, 0.45, z2 + 6.6, (platformX[1] - platformX[0]) / 2, 0.45, 3)
-    b.box(platformX[1] - platformX[0], 0.03, 0.4, m.yellowLine, M((platformX[0] + platformX[1]) / 2, 0.92, z2 + 4.2), 1)
-    this.bridge(b, -404, 24)
-    this.bridge(b, 459, 24)
-
-    // the terminal: colonial arcades facing the grid's south road, a clock tower, a long platform with a canopy
-    const brick = m.redBrick
-    for (const bx of [100, 170]) townBuilding(b, m, bx, 424, Math.PI, 66, 18, 3, brick, r, { shop: false })
-    b.box(14, 22, 14, m.redBrick, M(135, 11, 424), 2)
-    b.add(new THREE.ConeGeometry(10, 5, 4).rotateY(Math.PI / 4), m.roof, M(135, 24.5, 424))
-    const clock = new THREE.Mesh(new THREE.CircleGeometry(2.4, 32), new THREE.MeshStandardMaterial({ map: labelTexture(['12'], '#f4efe2', '#1a1a1a', 128, 128, '#f4efe2'), roughness: 0.5 }))
-    clock.position.set(135, 18, 431.1)
-    this.group.add(clock)
-    physics.fixedBox(135, 11, 424, 7, 11, 7)
-    for (const bx of [100, 170]) physics.fixedBox(bx, 6, 424, 33, 6, 9)
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(18, 3.2), new THREE.MeshStandardMaterial({ map: labelTexture(['SEALDAH', 'Suburban terminal · platforms 1 & 2'], '#7a1f12', '#fff4d6', 1024, 256, '#ffc61a'), roughness: 0.6 }))
-    sign.position.set(135, 14.2, 417.0)
-    sign.rotation.y = Math.PI
-    this.group.add(sign)
-    // platform
-    const px0 = platformX[0]
-    const px1 = platformX[1]
-    b.box(px1 - px0, 0.9, 6, m.concrete, M((px0 + px1) / 2, 0.45, 449.8), 3)
-    b.box(px1 - px0, 0.03, 0.4, m.yellowLine, M((px0 + px1) / 2, 0.92, 452.6), 1)
-    physics.fixedBox((px0 + px1) / 2, 0.45, 449.8, (px1 - px0) / 2, 0.45, 3)
-    b.box(px1 - px0 + 4, 0.3, 7.5, m.corrugated, M((px0 + px1) / 2, 5.4, 449.8), 2)
-    for (let x = px0 + 4; x < px1; x += 8) b.box(0.3, 4.5, 0.3, m.frame, M(x, 3.1, 452.2), 1)
-    for (let x = px0 + 6; x < px1 - 4; x += 14) {
-      b.box(2.2, 0.08, 0.6, m.wood, M(x, 1.4, 448), 1)
-      physics.fixedBox(x, 1.2, 448, 1.1, 0.4, 0.4)
+    const centre = (platformX[0] + platformX[1]) / 2
+    const length = platformX[1] - platformX[0]
+    for (const side of [-1, 1] as const) {
+      const z = side < 0 ? z1 - 5.45 : z2 + 5.45
+      this.platform(b, centre, z, length, 7.2, 'x', side < 0 ? 1 : -1)
+      for (const dx of [-49, 49]) this.board(b, centre + dx, 3.5, z, side > 0 ? Math.PI : 0, 5.7, 1.45, ['শিয়ালদহ', 'SEALDAH'], '#f4bf42', '#241c13')
     }
-    // steps from the street side
-    for (let i = 0; i < 4; i++) b.box(8, 0.22, 0.4, m.concrete, M(135, 0.12 + i * 0.22, 445.8 - i * 0.4), 1)
+    this.bridge(b, RAIL_RECT.z0 - RAIL.gap / 2, 18)
+    this.bridge(b, zc, 18)
+    // An open ticket hall connects the forecourt directly to platform one.
+    b.box(130, 0.2, 43, m.pavement, M(centre, 0, 428))
+    physics.fixedBox(centre, 0, 428, 65, 0.1, 21.5)
+    for (const dx of [-40, 40]) {
+      b.box(54, 10, 13, m.redBrick, M(centre + dx, 5, 429))
+      physics.fixedBox(centre + dx, 5, 429, 27, 5, 6.5)
+      for (let i = -22; i <= 22; i += 5.5) {
+        b.box(3.7, 2.5, 0.16, m.glass, M(centre + dx + i, 6.9, 422.45))
+        b.box(0.36, 9.6, 0.5, m.trim, M(centre + dx + i - 2.4, 4.8, 422.3))
+      }
+    }
+    b.box(137, 0.55, 17, m.trim, M(centre, 10.22, 429))
+    for (const dx of [-12, 12]) for (const dz of [-7, 7]) {
+      b.box(0.6, 9.9, 0.6, m.frame, M(centre + dx, 5, 429 + dz))
+      physics.fixedBox(centre + dx, 5, 429 + dz, 0.3, 5, 0.3)
+    }
+    this.board(b, centre, 8.1, 420.4, Math.PI, 24, 3.6, ['শিয়ালদহ  ·  SEALDAH', 'EASTERN RAILWAY'])
+    for (let i = 0; i < 5; i++) {
+      const h = 0.1 + (i + 1) * 0.16
+      const z = z1 - 9.05 - (4.5 - i) * 0.34
+      b.box(14, h, 0.34, m.concrete, M(centre, h / 2, z))
+      physics.fixedBox(centre, h / 2, z, 7, h / 2, 0.17)
+    }
+    // The footbridge begins at the ends of the canopies and clears the contact wires.
+    const footX = platformX[1] + 16
+    const footY = 8.15
+    for (const side of [-1, 1]) {
+      const pz = side < 0 ? z1 - 5.45 : z2 + 5.45
+      const run = 14.4, rise = footY - 0.9
+      for (let i = 0; i < 42; i++) {
+        const h = 0.9 + rise * (i + 1) / 42
+        b.box(run / 42, 0.24, 2.8, m.concrete, M(platformX[1] + (i + 0.5) * run / 42, h - 0.12, pz))
+      }
+      const ramp = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, rise), 0.2, 2.8), m.concrete)
+      ramp.position.set(platformX[1] + run / 2, 0.9 + rise / 2 - 0.11, pz)
+      ramp.rotation.z = Math.atan2(rise, run)
+      ramp.updateMatrixWorld()
+      b.add(ramp.geometry, m.concrete, ramp.matrixWorld)
+      physics.fixedMesh(ramp)
+      for (const d of [-1, 1]) {
+        b.box(Math.hypot(run, rise), 0.08, 0.08, m.rail, M(ramp.position.x, ramp.position.y + 1.1, pz + d * 1.31).multiply(new THREE.Matrix4().makeRotationZ(ramp.rotation.z)))
+        b.box(0.5, footY, 0.5, m.frame, M(footX, footY / 2, pz + d * 1.31))
+      }
+    }
+    b.box(3.2, 0.46, 19.8, m.concrete, M(footX, footY - 0.23, zc))
+    physics.fixedBox(footX, footY - 0.23, zc, 1.6, 0.23, 9.9)
+    for (const side of [-1, 1]) {
+      const len = side < 0 ? 13.9 : 19.8
+      b.box(0.12, 1.05, len, m.rail, M(footX + side * 1.55, footY + 0.525, zc))
+      physics.fixedBox(footX + side * 1.55, footY + 0.525, zc, 0.06, 0.525, len / 2)
+    }
+    for (const dx of [-20, 20]) {
+      this.board(b, centre + dx, 3.85, 422.36, Math.PI, 6, 1, ['টিকিট  ·  TICKETS'], '#254d40')
+      for (const w of [-1.5, 1.5]) {
+        b.box(1.95, 1.2, 0.16, m.glass, M(centre + dx + w, 2.12, 422.39))
+        b.box(2.14, 0.15, 0.68, m.trim, M(centre + dx + w, 1.49, 422.2))
+      }
+    }
 
     // the level crossing: a road over the tracks, planks, barriers and flashing lights
     const cx = crossingX
@@ -373,74 +438,90 @@ export class Transit {
 
   private flyover(b: Batch) {
     const { m, physics } = this
-    const W = RING.width
-    const ring = ringPath()
-    ring.push(ring[0].clone(), ring[1].clone())
     const asphalt = (m.asphalt as THREE.MeshStandardMaterial).clone()
     asphalt.side = THREE.DoubleSide
     const hw = new THREE.MeshStandardMaterial({ color: '#fff6e0', emissive: '#ffd79a', emissiveIntensity: 0.2 })
     this.glow.push({ mat: hw, day: 0.2, night: 5 })
-    const junction = (x: number, z: number) => GRID.some((gx) => GRID.some((gz) => Math.hypot(x - gx, z - gz) < 15))
-    this.roadSign(-193, -178, 0, ['RING FLYOVER', 'ENTRY ▲ north-west corner'])
-    this.roadSign(-193, -213, 0, ['RING FLYOVER', 'ENTRY ▲ keep left'])
-    this.roadSign(393, -178, 0, ['RING FLYOVER', 'EXIT ▼ north-east corner'])
-    this.roadSign(425, -190, 0, ['EXIT', 'to the city ▼'])
-    for (const path of [ring, rampUp(), rampDown()]) {
-      // the structure: a concrete girder with parapets; the driving surface is asphalt laid on top
-      // parapets only where the deck is off the ground: the ramp's foot is an open slab you can drive straight onto
-      // and no parapet within 32 m of where a ramp meets the ring, so you can drive on and off at the top
-      const low = (p: THREE.Vector3) => p.y < 0.9 || ([[-44, -200], [250, -200]] as const).some(([mx, mz]) => Math.hypot(p.x - mx, p.z - mz) < 32 && p.y > 5)
-      let i0 = 0
-      for (let i = 1; i <= path.length; i++) {
-        if (i < path.length && low(path[i]) === low(path[i0])) continue
-        const run = path.slice(Math.max(0, i0 - 1), Math.min(path.length, i + 1))
-        if (run.length > 1) {
-          const sec: [number, number][] = low(path[i0])
-            ? [[-W / 2, -1.2], [-W / 2, 0], [W / 2, 0], [W / 2, -1.2]]
-            : [[-W / 2 - 0.4, -1.6], [-W / 2 - 0.4, 0.95], [-W / 2, 0.95], [-W / 2, 0], [W / 2, 0], [W / 2, 0.95], [W / 2 + 0.4, 0.95], [W / 2 + 0.4, -1.6]]
-          const deck = new THREE.Mesh(sweep(run, sec), (m.concrete as THREE.MeshStandardMaterial).clone())
-          ;(deck.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide
-          deck.castShadow = deck.receiveShadow = true
-          this.group.add(deck)
-          deck.updateMatrixWorld(true)
-          physics.fixedMesh(deck)
-        }
-        i0 = i
+    this.roadSign(-209, -180, 0, ['RING ROAD', 'Flyover entry ↖'])
+    this.roadSign(209, -192, -Math.PI / 2, ['CITY EXIT', 'Eastern Bypass ↖'], RING.y)
+    for (const [route, pts] of [ringPath(), rampUp(), rampDown()].entries()) {
+      const ring = route === 0
+      const entry = route === 1
+      const edge = (p: THREE.Vector3, i: number, side: number) => {
+        const normal = sideNormal(pts, i, ring)
+        const w = ring ? RING.width : rampWidth(p.x, entry)
+        if (!ring && w < SLIPS.width) normal.set(0, 1)
+        return new THREE.Vector3(p.x + normal.x * side * w / 2, p.y, p.z + normal.y * side * w / 2)
       }
-      const surface = new THREE.Mesh(sweep(path.map((p) => p.clone().setY(p.y + 0.03)), [[-W / 2, 0], [W / 2, 0]], false), asphalt)
-      surface.receiveShadow = true
-      this.group.add(surface)
-      // piers every 24 m where the deck is off the ground, clear of junctions; lamps on the parapets
-      path.forEach((p, i) => {
-        const q = path[Math.min(path.length - 1, i + 1)]
-        const yaw = Math.atan2(q.x - p.x, q.z - p.z)
-        if (i % 6 === 3 && p.y > 2 && !junction(p.x, p.z)) {
-          b.box(1.9, p.y - 1.6, 1.9, m.concrete, M(p.x, (p.y - 1.6) / 2, p.z), 2)
-          b.box(W - 1, 0.9, 2.6, m.concrete, M(p.x, p.y - 2, p.z, yaw), 2)
-          physics.fixedBox(p.x, (p.y - 1.6) / 2, p.z, 0.95, (p.y - 1.6) / 2, 0.95)
+      const left = pts.map((p, i) => edge(p, i, -1))
+      const right = pts.map((p, i) => edge(p, i, 1))
+      const deck: number[] = [], uv: number[] = []
+      const barriers: THREE.BufferGeometry[] = []
+      let distance = 0
+      for (let i = 0; i < pts.length - (ring ? 0 : 1); i++) {
+        const j = (i + 1) % pts.length
+        const p = pts[i], q = pts[j]
+        const ds = p.distanceTo(q)
+        for (const [point, d, across] of [[left[i], distance, 0], [left[j], distance + ds, 0], [right[i], distance, 1], [right[i], distance, 1], [left[j], distance + ds, 0], [right[j], distance + ds, 1]] as const) {
+          deck.push(point.x, point.y, point.z)
+          uv.push(d / 5, across * (ring ? RING.width : SLIPS.width) / 5)
         }
-        if (i % 6 === 0 && p.y > -1) {
-          for (const s of [-1, 1]) {
-            const lx = p.x + Math.cos(yaw) * s * (W / 2 + 0.2)
-            const lz = p.z - Math.sin(yaw) * s * (W / 2 + 0.2)
-            b.box(0.14, 2.6, 0.14, m.frame, M(lx, p.y + 1.3, lz), 1)
-            b.add(new THREE.SphereGeometry(0.22, 10, 8), hw, M(lx, p.y + 2.7, lz))
+        const mid = p.clone().lerp(q, 0.5)
+        const joining = mid.z < -199 && mid.z > -214 && [SLIPS.entry, SLIPS.exit].some(([a, b]) => mid.x > a - 2 && mid.x < b + 2)
+        for (const [side, line] of [[-1, left], [1, right]] as const) {
+          if (joining && ((ring && side < 0) || (!ring && side > 0))) continue
+          const outside = [line[i], line[j]]
+          const wall = sweep(outside, [[-0.12, -0.56], [-0.12, 0.74], [0.12, 0.74], [0.12, -0.56]])
+          if (mid.y > 0.7) {
+            b.add(wall, m.concrete)
+            barriers.push(wall)
           }
-          b.box(0.15, 0.02, 2.4, m.line, M(p.x, p.y + 0.07, p.z, yaw), 1)
+          if (mid.y > 3 && i % 10 === 3 && side === -1 && !joining) {
+            const lp = line[i]
+            b.box(0.11, 4.5, 0.11, m.frame, M(lp.x, lp.y + 2.25, lp.z))
+            b.box(0.6, 0.12, 0.4, hw, M(lp.x, lp.y + 4.51, lp.z))
+          }
         }
-      })
+        const yaw = Math.atan2(q.x - p.x, q.z - p.z)
+        const width = ring ? RING.width : rampWidth(mid.x, entry)
+        if (width > 1) b.box(width - 0.45, 0.9, ds + 0.03, m.concrete, M(mid.x, mid.y - 0.52, mid.z, yaw).multiply(new THREE.Matrix4().makeRotationX(-Math.asin((q.y - p.y) / ds))))
+        if (ring) {
+          b.box(0.38, 0.48, ds + 0.02, m.concrete, M(mid.x, mid.y + 0.24, mid.z, yaw))
+          if (i % 2 === 0) for (const side of [-1, 1]) b.box(0.10, 0.018, 2.3, m.line, M(mid.x + Math.cos(yaw) * side * 3.4, mid.y + 0.015, mid.z - Math.sin(yaw) * side * 3.4, yaw))
+        }
+        if (width > 4.5 && mid.y > 2.5 && i % 7 === 4 && !joining && !GRID.some(gx => GRID.some(gz => Math.hypot(mid.x - gx, mid.z - gz) < 13))) {
+          b.box(1.4, mid.y - 0.8, 1.65, m.concrete, M(mid.x, (mid.y - 0.8) / 2, mid.z, yaw))
+          b.box(width - 0.9, 0.65, 2, m.concrete, M(mid.x, mid.y - 1.12, mid.z, yaw))
+          physics.fixedBox(mid.x, (mid.y - 0.8) / 2, mid.z, 0.7, (mid.y - 0.8) / 2, 0.825, yaw)
+        }
+        distance += ds
+      }
+      if (barriers.length) physics.fixedMesh(new THREE.Mesh(mergeGeometries(barriers)!))
+      const geom = new THREE.BufferGeometry()
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(deck, 3))
+      geom.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+      geom.setIndex(Array.from({ length: deck.length / 3 }, (_, n) => n - n % 3 + [0, 2, 1][n % 3]))
+      geom.computeVertexNormals()
+      const road = new THREE.Mesh(geom, asphalt)
+      road.castShadow = road.receiveShadow = true
+      this.group.add(road)
+      physics.fixedMesh(road)
+      if (ring) {
+        const median = new THREE.Mesh(sweep([...pts, pts[0]], [[-0.19, 0], [-0.19, 0.48], [0.19, 0.48], [0.19, 0]]))
+        physics.fixedMesh(median)
+      }
     }
   }
 
   /** a green direction sign on two posts */
-  private roadSign(x: number, z: number, yaw: number, lines: string[]) {
+  private roadSign(x: number, z: number, yaw: number, lines: string[], height = 0) {
     const board = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.6), new THREE.MeshStandardMaterial({ map: labelTexture(lines, '#0e5a2e', '#ffffff', 1024, 256, '#ffffff'), roughness: 0.6, side: THREE.DoubleSide }))
-    board.position.set(x, 4.6, z)
+    board.position.set(x, height + 4.6, z)
     board.rotation.y = yaw
     this.group.add(board)
     for (const s of [-1, 1]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.6, 0.2), this.m.frame)
-      post.position.set(x + Math.cos(yaw) * s * 3.6, 2.3, z - Math.sin(yaw) * s * 3.6)
+      post.position.set(x + Math.cos(yaw) * s * 3.6, height + 2.3, z - Math.sin(yaw) * s * 3.6)
       this.group.add(post)
     }
   }
@@ -448,56 +529,11 @@ export class Transit {
   /* ── trains ───────────────────────────────────────────────── */
 
   private makeTrain(coaches: number, len: number, kind: 'metro' | 'rail'): Train {
-    const bodyMat = new THREE.MeshStandardMaterial({ color: kind === 'metro' ? '#f4f6fa' : '#e9e6dc', roughness: 0.45, metalness: 0.2 })
-    const stripe = new THREE.MeshStandardMaterial({ color: kind === 'metro' ? '#1f55c2' : '#1d6b3a', roughness: 0.5 })
-    const dark = new THREE.MeshStandardMaterial({ color: '#17181c', roughness: 0.7 })
-    const windows = new THREE.MeshStandardMaterial({ color: '#27323c', roughness: 0.2, metalness: 0.4, emissive: '#ffe3a8', emissiveIntensity: 0.1 })
-    const head = new THREE.MeshStandardMaterial({ color: '#fff', emissive: '#fff4d0', emissiveIntensity: 0.3 })
+    const windows = new THREE.MeshStandardMaterial({ color: '#364857', metalness: 0.35, roughness: 0.23, emissive: '#ffdfb5' })
+    const head = new THREE.MeshStandardMaterial({ color: '#fffbea', emissive: '#fff4d0' })
     const gap = 0.7
-    const total = coaches * len + (coaches - 1) * gap
-    const H = kind === 'metro' ? 3.5 : 3.7
-    const cars: THREE.Group[] = []
-    for (let c = 0; c < coaches; c++) {
-      const group = new THREE.Group()
-      const body = new THREE.Mesh(new THREE.BoxGeometry(len, H, 3.2), bodyMat)
-      body.position.set(0, H / 2 + 0.55, 0)
-      body.castShadow = true
-      group.add(body)
-      const band = new THREE.Mesh(new THREE.BoxGeometry(len + 0.02, 0.55, 3.22), stripe)
-      band.position.set(0, 0.55 + H * 0.28, 0)
-      group.add(band)
-      for (const s of [-1, 1]) {
-        const win = new THREE.Mesh(new THREE.BoxGeometry(len - 2.4, 1.0, 0.05), windows)
-        win.position.set(0, 0.55 + H * 0.62, s * 1.62)
-        group.add(win)
-        for (const dx of [-len / 3, 0, len / 3]) {
-          const door = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.3, 0.05), dark)
-          door.position.set(dx, 0.55 + 1.2, s * 1.62)
-          group.add(door)
-        }
-      }
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(len - 1, 0.35, 2.4), dark)
-      roof.position.set(0, H + 0.7, 0)
-      group.add(roof)
-      for (const dx of [-len / 2 + 3, len / 2 - 3]) {
-        const bogie = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.5, 2.4), dark)
-        bogie.position.set(dx, 0.3, 0)
-        group.add(bogie)
-      }
-      for (const s of [-1, 1]) {
-        if ((s === 1 && c !== 0) || (s === -1 && c !== coaches - 1)) continue
-        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.35, 0.9), head)
-        lamp.position.set(s * (len / 2 + 0.02), 1.5, 0)
-        group.add(lamp)
-      }
-      if (kind === 'rail' && c === 1) {
-        const pan = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 2.2), dark)
-        pan.position.set(0, H + 1.4, 0)
-        group.add(pan)
-      }
-      cars.push(group)
-    }
-    return { cars, bodies: [], loop: undefined as unknown as Loop, kind, len, gap, total, s: 0, v: 0, top: 20, stops: [], wait: 0, served: -1, cross: 0, windows, head, y: 0 }
+    const cars = Array.from({ length: coaches }, (_, i) => buildCoach(kind, len, i === 0 ? 1 : i === coaches - 1 ? -1 : 0, windows, head))
+    return { cars, bodies: [], loop: undefined as unknown as Loop, kind, len, gap, total: coaches * len + (coaches - 1) * gap, s: 0, v: 0, top: 20, stops: [], wait: 0, served: -1, cross: 0, windows, head, y: 0, direction: 1, nextStop: 0, door: 0 }
   }
 
   /** the barriers are down while a rail train is within reach of the crossing */
@@ -510,45 +546,54 @@ export class Transit {
     return false
   }
 
-  update(dt: number, night: number) {
+  update(dt: number, night: number, player?: THREE.Vector3) {
+    for (const flap of this.gates) {
+      const open = player && Math.abs(player.y - flap.position.y) < 3 && Math.hypot(player.x - flap.position.x, player.z - flap.position.z) < 3.8
+      flap.rotation.y = THREE.MathUtils.damp(flap.rotation.y, open ? flap.userData.side * 1.5 : 0, 9, dt)
+    }
     for (const t of this.trains) {
       const L = t.loop.length
-      // accelerate towards cruise; slow for a station stop and wait there
-      let target = t.top
+      const stop = t.stops[t.nextStop]
       if (t.wait > 0) {
-        t.wait -= dt
-        target = 0
+        t.wait = Math.max(0, t.wait - dt)
       } else {
-        if (t.served >= 0 && Math.abs(wrap(t.s - t.served, L)) > 20) t.served = -1
-        for (const stop of t.stops) {
-          if (stop === t.served) continue
-          const d = wrap(stop - t.s, L)
-          if (d > -0.5 && d < 50) target = Math.min(target, Math.max(2, d * 0.35))
-          if (Math.abs(d) < 0.8 && t.v < 3) {
-            t.wait = 9
-            t.s = stop
-            t.v = 0
-            t.served = stop
-          }
+        const distance = t.loop.closed ? (stop - t.s + L) % L : Math.abs(stop - t.s)
+        const target = Math.min(t.top, Math.sqrt(2 * 1.15 * distance))
+        t.v = THREE.MathUtils.clamp(target, t.v - 1.25 * dt, t.v + 0.95 * dt)
+        const advance = t.v * dt
+        if (distance <= Math.max(advance, 0.02)) {
+          t.s = stop
+          t.v = 0
+          t.wait = t.kind === 'metro' ? 10 : 12
+          t.served = t.nextStop
+          if (!t.loop.closed && (t.nextStop === 0 || t.nextStop === t.stops.length - 1)) t.direction = t.nextStop === 0 ? 1 : -1
+          t.nextStop = (t.nextStop + t.direction + t.stops.length) % t.stops.length
+        } else {
+          t.s += advance * t.direction
+          if (t.loop.closed) t.s %= L
         }
       }
-      t.v += (target - t.v) * Math.min(1, dt * 0.9)
-      t.s = (t.s + t.v * dt) % L
+      const opening = t.wait > 1.5 ? 1 : 0
+      t.door = THREE.MathUtils.damp(t.door, opening, 5, dt)
       // each coach sits between two points of the track, so it bends round the curves
       t.cars.forEach((car, i) => {
         const sc = t.s + t.total / 2 - t.len / 2 - i * (t.len + t.gap)
         const a = t.loop.sample(sc - t.len * 0.4, this.tA).p
         const c = t.loop.sample(sc + t.len * 0.4, this.tB).p
         const yaw = Math.atan2(-(c.z - a.z), c.x - a.x)
+        const pitch = Math.atan2(c.y - a.y, Math.hypot(c.z - a.z, c.x - a.x))
         car.position.set((a.x + c.x) / 2, (a.y + c.y) / 2 + t.y, (a.z + c.z) / 2)
-        car.rotation.y = yaw
+        car.rotation.set(0, yaw, pitch, 'YXZ')
+        // Local +z is the right side of the track tangent. The suburban inner track serves the inner platform.
+        const platformSide = t.kind === 'metro' ? (car.position.x < METRO.x ? 1 : -1) : -1
+        car.setDoors(platformSide, t.door)
         const body = t.bodies[i]
         if (body) {
-          body.setNextKinematicTranslation({ x: car.position.x, y: 2.2, z: car.position.z })
-          body.setNextKinematicRotation(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)))
+          body.setNextKinematicTranslation({ x: car.position.x, y: car.position.y + 2.05, z: car.position.z })
+          body.setNextKinematicRotation(car.quaternion)
         }
       })
-      t.windows.emissiveIntensity = 0.1 + night * 1.9
+      t.windows.emissiveIntensity = 0.06 + night * 0.72
       t.head.emissiveIntensity = 0.3 + night * 3
     }
     // level crossing

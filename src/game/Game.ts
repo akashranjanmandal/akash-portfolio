@@ -74,6 +74,7 @@ export class Game {
     this.spawnVehicles()
     // one physics step so the controller has a ground contact before the first frame
     this.physics.world.step()
+    this.world.populate()
     await this.engine.renderer.compileAsync(this.engine.scene, this.engine.camera)
     onProgress(1)
   }

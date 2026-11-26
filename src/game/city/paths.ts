@@ -14,7 +14,6 @@ export function roundedLoop(corners: [number, number][], r: number, step = 4): T
     const a = c.clone().sub(prev).normalize()
     const b = next.clone().sub(c).normalize()
     const t1 = c.clone().addScaledVector(a, -r)
-    const t2 = c.clone().addScaledVector(b, r)
     // the straight from the previous corner's exit to this corner's entry
     const prevExit = prev.clone().addScaledVector(c.clone().sub(prev).normalize(), r)
     const len = prevExit.distanceTo(t1)
@@ -22,12 +21,13 @@ export function roundedLoop(corners: [number, number][], r: number, step = 4): T
       const p = prevExit.clone().lerp(t1, d / len)
       out.push(new THREE.Vector3(p.x, 0, p.y))
     }
-    // the bend: a quadratic curve with the corner as its control point
-    const k = Math.max(6, Math.round((r * Math.PI) / 2 / step))
+    const centre = t1.clone().addScaledVector(b, r)
+    const turn = Math.atan2(a.cross(b), a.dot(b))
+    const start = Math.atan2(t1.y - centre.y, t1.x - centre.x)
+    const k = Math.max(6, Math.round(Math.abs(turn) * r / step))
     for (let j = 0; j < k; j++) {
-      const t = j / k
-      const p = t1.clone().multiplyScalar((1 - t) ** 2).add(c.clone().multiplyScalar(2 * t * (1 - t))).add(t2.clone().multiplyScalar(t * t))
-      out.push(new THREE.Vector3(p.x, 0, p.y))
+      const angle = start + turn * j / k
+      out.push(new THREE.Vector3(centre.x + r * Math.cos(angle), 0, centre.y + r * Math.sin(angle)))
     }
   }
   return out
@@ -57,17 +57,17 @@ export class Loop {
   readonly cum: number[] = [0]
   readonly length: number
 
-  constructor(readonly pts: THREE.Vector3[]) {
-    for (let i = 1; i <= pts.length; i++) this.cum.push(this.cum[i - 1] + pts[i - 1].distanceTo(pts[i % pts.length]))
-    this.length = this.cum[pts.length]
+  constructor(readonly pts: THREE.Vector3[], readonly closed = true) {
+    for (let i = 1; i <= pts.length - (closed ? 0 : 1); i++) this.cum.push(this.cum[i - 1] + pts[i - 1].distanceTo(pts[i % pts.length]))
+    this.length = this.cum[this.cum.length - 1]
   }
 
   /** position and horizontal heading at arc length s (wraps) */
   sample(s: number, out = new THREE.Vector3()) {
     const L = this.length
-    s = ((s % L) + L) % L
+    s = this.closed ? ((s % L) + L) % L : Math.max(0, Math.min(L, s))
     let lo = 0
-    let hi = this.pts.length
+    let hi = this.cum.length - 1
     while (hi - lo > 1) {
       const mid = (lo + hi) >> 1
       if (this.cum[mid] <= s) lo = mid

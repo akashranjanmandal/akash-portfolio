@@ -3,7 +3,7 @@ import type { Physics } from '../Physics'
 import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
 import { SCALE } from '../Scale'
-import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame, districtAt, LANES } from './Plan'
+import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame, districtAt, LANES, metroClearance, EDEN, inEden } from './Plan'
 import { sweep } from './paths'
 import { buildDistricts, type DistrictOut } from './Districts'
 import { rng } from '../../utils/math'
@@ -323,6 +323,7 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
 export class Town {
   readonly group = new THREE.Group()
   readonly mats: Materials
+  readonly buildingClearances: { x: number; z: number; r: number }[] = []
   readonly lampPositions: THREE.Vector3[] = []
 
   constructor(private physics: Physics, private assets: Assets) {
@@ -376,12 +377,13 @@ export class Town {
         const a = GRID[i] + ROAD_W / 2 + 6
         const c = GRID[i + 1] - ROAD_W / 2 - 6
         for (let t = a; t < c; t += 6) {
-          b.add(new THREE.PlaneGeometry(0.15, 3).rotateX(-Math.PI / 2), m.line, M(g, 0.035, t + 1.5))
-          b.add(new THREE.PlaneGeometry(3, 0.15).rotateX(-Math.PI / 2), m.line, M(t + 1.5, 0.035, g))
+          if (!inEden(g, t + 1.5)) b.add(new THREE.PlaneGeometry(0.15, 3).rotateX(-Math.PI / 2), m.line, M(g, 0.035, t + 1.5))
+          if (!inEden(t + 1.5, g)) b.add(new THREE.PlaneGeometry(3, 0.15).rotateX(-Math.PI / 2), m.line, M(t + 1.5, 0.035, g))
         }
       }
       for (const h of GRID) {
         for (const [dx, dz, rot] of [[0, ROAD_W / 2 + 2.2, 0], [0, -ROAD_W / 2 - 2.2, 0], [ROAD_W / 2 + 2.2, 0, 1], [-ROAD_W / 2 - 2.2, 0, 1]] as const) {
+          if (inEden(g + dx, h + dz)) continue
           for (let k = -4; k <= 4; k++) {
             const geo = new THREE.PlaneGeometry(0.5, 3).rotateX(-Math.PI / 2)
             if (rot) b.add(geo, m.line, M(g + dx, 0.036, h + dz + k * 1, Math.PI / 2))
@@ -394,11 +396,15 @@ export class Town {
 
   private blocks(b: Batch) {
     const m = this.mats
+    const side = 2 * EDEN.half
+    b.box(side, CURB, side, m.pavement, M(EDEN.x, CURB / 2, EDEN.z))
+    this.physics.fixedBox(EDEN.x, CURB / 2, EDEN.z, EDEN.half, CURB / 2, EDEN.half)
     const size = 100 - ROAD_W
     for (let i = 0; i < GRID.length - 1; i++) {
       for (let j = 0; j < GRID.length - 1; j++) {
         const cx = (GRID[i] + GRID[i + 1]) / 2
         const cz = (GRID[j] + GRID[j + 1]) / 2
+        if (inEden(cx, cz)) continue
         // pavement ring + kerb, then the block interior
         b.box(size, CURB, size, m.pavement, M(cx, CURB / 2, cz), 2)
         // kerbs are always built along their local x so the stripes run the right way
@@ -453,7 +459,7 @@ export class Town {
           const ox = p.x + p.nx * side * off
           const oz = p.z + p.nz * side * off
           s += w + 1 + r() * 2.5
-          if (r() < 0.22) continue
+          if (r() < 0.22 || metroClearance(ox, oz, Math.hypot(w, d) / 2 + 1)) continue
           const rad = Math.max(w, d) / 2
           // clear of other stretches of this lane and of the houses already placed
           if (lane.pts.some((q) => Math.hypot(q.x - ox, q.z - oz) < 2.4 + d / 2 - 0.2)) continue
@@ -463,6 +469,7 @@ export class Town {
           const wall = r() < 0.3 ? m.brick : m.plaster[Math.floor(r() * m.plaster.length)]
           townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.3, fairy: this.fairyBuf, sides: false })
           this.physics.fixedBox(ox, (floors * FLOOR) / 2, oz, w / 2, (floors * FLOOR) / 2, d / 2, yaw)
+          this.buildingClearances.push({ x: ox, z: oz, r: Math.hypot(w, d) / 2 })
           mine.push({ x: ox, z: oz, r: rad })
           keep.push({ x: ox, z: oz, r: rad })
         }
@@ -506,6 +513,7 @@ export class Town {
             const ox = cx + fx * (BLOCK_HALF - d / 2) + (fz !== 0 ? along : 0)
             const oz = cz + fz * (BLOCK_HALF - d / 2) + (fx !== 0 ? along : 0)
             t += w + 1.5 + r() * 3
+            if (metroClearance(ox, oz, (fx !== 0 ? d : w) / 2 + 1.5)) continue
             if (occupied.some((o) => (o.x - ox) ** 2 + (o.z - oz) ** 2 < (o.r + Math.max(w, d) / 2) ** 2)) continue
             // corners: keep the very ends clear so perpendicular rows don't collide
             if (Math.abs(along) > BLOCK_HALF - 9 - w / 2) continue
@@ -513,6 +521,7 @@ export class Town {
             const wall = r() < 0.2 ? m.brick : r() < 0.15 ? m.concrete : m.plaster[Math.floor(r() * m.plaster.length)]
             townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.55, fairy: this.fairyBuf, sides: false })
             this.physics.fixedBox(ox, (floors * FLOOR) / 2, oz, (fz !== 0 ? w : d) / 2, (floors * FLOOR) / 2, (fz !== 0 ? d : w) / 2)
+            this.buildingClearances.push({ x: ox, z: oz, r: Math.hypot(w, d) / 2 })
             occupied.push({ x: ox, z: oz, r: Math.max(w, d) / 2 })
           }
         }
@@ -531,6 +540,7 @@ export class Town {
         const cz = (GRID[j] + GRID[j + 1]) / 2
         for (const t of [-34, -12, 12, 34]) {
           for (const [px, pz, yaw] of [[cx + t, cz + edge, 0], [cx + t, cz - edge, Math.PI], [cx + edge, cz + t, Math.PI / 2], [cx - edge, cz + t, -Math.PI / 2]] as const) {
+            if (metroClearance(px, pz, 0.6) || (inEden(px, pz) && Math.max(Math.abs(px - EDEN.x), Math.abs(pz - EDEN.z)) < EDEN.half - 2)) continue
             mats.push(M(px, CURB, pz, yaw, 1.6, 1.6, 1.6))
             this.lampPositions.push(new THREE.Vector3(px, 0, pz))
             this.physics.fixedCylinder(px, 2.5, pz, 0.18, 5)

@@ -17,32 +17,38 @@ export function ringPath() {
   return roundedLoop(RING.corners, RING.r, 4).map((p) => p.setY(RING.y))
 }
 
-/** up: from the north-west junction, 16 m north, then east, climbing for 100 m and merging into the ring's north side */
+export const SLIPS = { width: 5.4, entry: [-64, -16], exit: [208, 256] }
+const edgeZ = -200 - RING.width / 2
+const outsideZ = edgeZ - SLIPS.width / 2
+
+export function rampWidth(x: number, entry: boolean) {
+  const [a, b] = entry ? SLIPS.entry : SLIPS.exit
+  const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1)
+  return SLIPS.width * (entry ? 1 - t : t)
+}
+
 export function rampUp() {
   const pts: THREE.Vector3[] = []
-  for (let k = 0; k <= 6; k++) {
-    const a = (k / 6) * Math.PI * 0.5
-    pts.push(new THREE.Vector3(-200 + 20 * (1 - Math.cos(a)), 0, -196 - 20 * Math.sin(a)))
+  for (let k = 0; k <= 10; k++) {
+    const a = k * Math.PI / 20
+    pts.push(new THREE.Vector3(-180 - 22.4 * Math.cos(a), 0.09, -193.6 - 22.4 * Math.sin(a)))
   }
-  for (let x = -176; x <= -84; x += 4) pts.push(new THREE.Vector3(x, RING.y * smooth((x + 180) / 96), -216))
-  for (let k = 1; k <= 10; k++) {
-    const t = k / 10
-    pts.push(new THREE.Vector3(-84 + 40 * t, RING.y, -216 + 16 * smooth(t)))
+  for (let x = -176; x <= SLIPS.entry[1]; x += 4) {
+    const z = x < SLIPS.entry[0] ? -216 + (outsideZ + 216) * smooth((x + 104) / 40) : edgeZ - rampWidth(x, true) / 2
+    pts.push(new THREE.Vector3(x, 0.09 + (RING.y - 0.09) * smooth((x + 180) / 112), z))
   }
   return pts
 }
 
-/** down: leaving the ring at x = 250, out to z = -216, descending east, then turning south into the north-east junction */
 export function rampDown() {
   const pts: THREE.Vector3[] = []
-  for (let k = 0; k <= 10; k++) {
-    const t = k / 10
-    pts.push(new THREE.Vector3(250 + 38 * t, RING.y, -200 - 16 * smooth(t)))
+  for (let x = SLIPS.exit[0]; x <= 380; x += 4) {
+    const z = x <= SLIPS.exit[1] ? edgeZ - rampWidth(x, false) / 2 : outsideZ - (outsideZ + 216) * smooth((x - 256) / 40)
+    pts.push(new THREE.Vector3(x, 0.09 + (RING.y - 0.09) * (1 - smooth((x - 260) / 120)), z))
   }
-  for (let x = 292; x <= 380; x += 4) pts.push(new THREE.Vector3(x, RING.y * (1 - smooth((x - 288) / 92)), -216))
-  for (let k = 1; k <= 6; k++) {
-    const a = (k / 6) * Math.PI * 0.5
-    pts.push(new THREE.Vector3(380 + 20 * Math.sin(a), 0, -216 + 20 * (1 - Math.cos(a))))
+  for (let k = 1; k <= 10; k++) {
+    const a = k * Math.PI / 20
+    pts.push(new THREE.Vector3(380 + 17.6 * Math.sin(a), 0.09, -216 + 17.6 * (1 - Math.cos(a))))
   }
   return pts
 }

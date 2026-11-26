@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { RAPIER, type Physics } from './Physics'
 import { ambassador, type Ambassador } from './Ambassador'
-import { GRID, ROAD_W, HIGHWAY } from './city/Plan'
+import { GRID, ROAD_W, HIGHWAY, EDEN, inEden } from './city/Plan'
 import { ringTrafficLoops } from './city/Flyover'
 import { rng } from '../utils/math'
 
@@ -110,7 +110,11 @@ export class Traffic {
       const iz = Math.floor(r() * (lines.length - 1))
       const wx = Math.min(lines.length - 1 - ix, 1 + Math.floor(r() * 2))
       const wz = Math.min(lines.length - 1 - iz, 1 + Math.floor(r() * 2))
-      const path = loopPath(lines[ix], lines[iz], lines[ix + wx], lines[iz + wz])
+      let path = loopPath(lines[ix], lines[iz], lines[ix + wx], lines[iz + wz])
+      if (path.some(p => inEden(p.x, p.z))) {
+        const edge = EDEN.half + ROAD_W / 2
+        path = loopPath(EDEN.x - edge, EDEN.z - edge, EDEN.x + edge, EDEN.z + edge)
+      }
       const dist = [0]
       for (let k = 1; k <= path.length; k++) dist.push(dist[k - 1] + path[k - 1].distanceTo(path[k % path.length]))
       const car = ambassador()
@@ -258,7 +262,7 @@ export function kerbSpots(avoid: { x: number; z: number }[], max: number) {
         if (g === 0 && vertical) continue // tram lane
         const x = vertical ? g + side * (ROAD_W / 2 - 1.0) : t
         const z = vertical ? t : g + side * (ROAD_W / 2 - 1.0)
-        if (avoid.some((e) => Math.hypot(e.x - x, e.z - z) < 12)) continue
+        if (inEden(x, z) || avoid.some((e) => Math.hypot(e.x - x, e.z - z) < 12)) continue
         // parked facing the direction of travel on that side (left-hand traffic)
         const yaw = vertical ? (side < 0 ? 0 : Math.PI) : side < 0 ? -Math.PI / 2 : Math.PI / 2
         spots.push([x, z, yaw])
