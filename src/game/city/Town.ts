@@ -460,7 +460,11 @@ export class Town {
           const oz = p.z + p.nz * side * off
           s += w + 1 + r() * 2.5
           if (r() < 0.22 || metroClearance(ox, oz, Math.hypot(w, d) / 2 + 1)) continue
-          const rad = Math.max(w, d) / 2
+          const rad = Math.hypot(w, d) / 2
+          // stay inside the block's buildable area: never out over the pavement or the road
+          const bx = Math.floor(ox / 100) * 100 + 50
+          const bz = Math.floor(oz / 100) * 100 + 50
+          if (Math.abs(ox - bx) + rad > BLOCK_HALF || Math.abs(oz - bz) + rad > BLOCK_HALF) continue
           // clear of other stretches of this lane and of the houses already placed
           if (lane.pts.some((q) => Math.hypot(q.x - ox, q.z - oz) < 2.4 + d / 2 - 0.2)) continue
           if (mine.some((o) => Math.hypot(o.x - ox, o.z - oz) < o.r + rad - 0.5)) continue
@@ -514,7 +518,7 @@ export class Town {
             const oz = cz + fz * (BLOCK_HALF - d / 2) + (fx !== 0 ? along : 0)
             t += w + 1.5 + r() * 3
             if (metroClearance(ox, oz, (fx !== 0 ? d : w) / 2 + 1.5)) continue
-            if (occupied.some((o) => (o.x - ox) ** 2 + (o.z - oz) ** 2 < (o.r + Math.max(w, d) / 2) ** 2)) continue
+            if (occupied.some((o) => (o.x - ox) ** 2 + (o.z - oz) ** 2 < (o.r + Math.hypot(w, d) / 2) ** 2)) continue
             // corners: keep the very ends clear so perpendicular rows don't collide
             if (Math.abs(along) > BLOCK_HALF - 9 - w / 2) continue
             const floors = 2 + Math.floor(r() * 4)
@@ -522,7 +526,7 @@ export class Town {
             townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.55, fairy: this.fairyBuf, sides: false })
             this.physics.fixedBox(ox, (floors * FLOOR) / 2, oz, (fz !== 0 ? w : d) / 2, (floors * FLOOR) / 2, (fz !== 0 ? d : w) / 2)
             this.buildingClearances.push({ x: ox, z: oz, r: Math.hypot(w, d) / 2 })
-            occupied.push({ x: ox, z: oz, r: Math.max(w, d) / 2 })
+            occupied.push({ x: ox, z: oz, r: Math.hypot(w, d) / 2 })
           }
         }
       }

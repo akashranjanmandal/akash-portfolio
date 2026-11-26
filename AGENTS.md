@@ -74,11 +74,17 @@ Coordinates: metres, x east, z south (so -z is north), y up. Grid lines every 10
 - **Victoria Memorial district**: lit monument, striped lawns, two fountains, Queen's pavilion, gate with name board, cypress avenue, paths, lamps.
 - **Narrow lanes**: through-lanes that connect two streets across every other block, lined with small houses, a shrine and lamps (`LANES` in `Plan.ts`; none is a dead end).
 - **Ring flyover** (13 m wide deck at 9.2 m) above the whole outer road ring, up-ramp at the north-west junction, down-ramp at the north-east, ring traffic both ways, parapets removed near merges, direction signs.
-- **Metro**: closed viaduct loop over four blocks, three climbable stations (Esplanade, Park Street, Maidan) with stairs and landings, two tracks, articulated coaches.
+- **Metro**: closed viaduct loop over four blocks, three climbable stations (Esplanade, Park Street, Maidan) with covered three-flight stairs, landings and fare gates, two tracks, articulated coaches.
 - **Suburban railway**: double-track circuit around the city (Howrah in the west, over two girder bridges across the Hooghly, Sealdah in the south, east leg along the Bypass), platforms at both stations, overhead wires, level crossing with barriers, bells and lamps; trains stop and continue, never reverse.
 - **Eden Gardens**: two-tier coloured bowl with aisles, ribbed concrete facade with lit windows, cantilever roof with trusses, clubhouse, sightscreen, scoreboard, ad boards, floodlight towers, vomitory gates.
 - **Hills**: tunnel portal on the Eastern Bypass, hairpin road with painted parapets, mixed spruce / fir / pine / broadleaf forest, shrubs and rocks, tea terraces, Sandakphu viewpoint, Kanchenjunga panorama, snow-capped outer ranges, expedition trail.
 - Performance pass described above.
+
+## Testing
+
+`npm run test:city` (scripts/test-city.mjs, pass a folder to save screenshots) boots the real app in headless Chrome and asserts: map + waypoints, fps on the metro platform, no fixed object inside any train envelope, every train serves every stop, crossing gates cycle, population > 500 with all outfits, **no two solid buildings intersect**, all six metro entrances walkable up through fare control and back, a steered supercar drives ramp → ring → exit, city/hills round trip, low and high tiers, zero browser errors. Run it after any layout change.
+
+Placement rule learned the hard way: buildings are spaced with a circle of radius `hypot(w, d) / 2` (the box's half-diagonal), never `max(w, d) / 2`, and lane houses must stay inside their block's buildable square, or corners poke into neighbours and the road under the ring.
 
 ## Open work
 
@@ -86,6 +92,7 @@ Coordinates: metres, x east, z south (so -z is north), y up. Grid lines every 10
 - Portals to friends' worlds (needs their URLs; same stack).
 - Ring flyover: verify a steered drive up the ramp and onto the ring end to end; consider traffic entering from the ramps.
 - Stadium: an even larger footprint would need closing two grid roads; Eden's Burmese pagoda is not built.
+- Realism backlog the user flagged (do in this order): GOBT office as a top-notch hero building; filler buildings have blank rear walls (perf choice `sides: false`), give them windows or real backs; tree and grass assets look stylised (swap to better GLB/foliage); road edges vs ground need kerb/verge texture; lamps and flyover need detail (expansion joints, drainage, signage); car engine sound and character movement feel.
 - Narrow lanes only exist in 9 of 36 blocks (plots and districts reject the rest).
 - Production deploy is still the draft site until the user approves.
 

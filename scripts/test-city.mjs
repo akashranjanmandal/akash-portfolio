@@ -104,8 +104,26 @@ try {
   assert.equal(transit.trafficInStadium, false)
   assert.deepEqual(transit.visits, [3, 3, 2, 2, 2, 2])
   assert.ok(!transit.badStop && transit.closed && transit.reopened && transit.clearance.every(h => h > 7))
-  assert.ok(transit.people > 100 && transit.outfits === 6)
+  assert.ok(transit.people > 500 && transit.outfits === 6)
   console.log('All six trains served every scheduled stop. Crossing gates cycled. Population:', transit.people)
+  const overlaps = await page.evaluate(() => {
+    // solid buildings must never intersect each other (thin walls and towers sharing a base are allowed)
+    const w = __app.game.physics.world, boxes = [], hits = []
+    w.forEachCollider(c => { const h = c.halfExtents?.(); if (h && c.parent()?.isFixed() && h.y > 1.5 && h.x > 1.5 && h.z > 1.5) boxes.push(c) })
+    for (const c of boxes) {
+      const t = c.translation(), a = c.halfExtents()
+      w.intersectionsWithShape(t, c.rotation(), c.shape, o => {
+        if (o.handle <= c.handle || !boxes.includes(o)) return true
+        const u = o.translation(), d = o.halfExtents()
+        if (Math.abs(t.x - u.x) < 0.5 || Math.abs(t.z - u.z) < 0.5) return true
+        if (Math.min(a.x + d.x - Math.abs(t.x - u.x), a.z + d.z - Math.abs(t.z - u.z)) > 0.6) hits.push([t.x, t.z, u.x, u.z].map(n => Math.round(n)))
+        return true
+      })
+    }
+    return hits
+  })
+  assert.deepEqual(overlaps, [], 'Buildings intersect: ' + JSON.stringify(overlaps))
+  console.log('No buildings intersect each other.')
   const stairs = await page.evaluate(async () => {
     const g = __app.game, player = g.player
     const { METRO } = await import('/src/game/city/Plan.ts')

@@ -110,6 +110,22 @@ export class Pedestrians {
       person(x + 7.5, 0.15, z + 2, 0, 5)
       person(x - 7.6, 0.15, z + 15, Math.PI, 5)
     }
+    // everyday foot traffic: people strolling both pavements of every street
+    for (const g of [-200, -100, 0, 100, 200, 300, 400]) for (let a = -200; a < 400; a += 100) for (const side of [-1, 1]) for (const k of [22, 50, 78]) {
+      const off = side * 6.75, along = a + k + (r() - 0.5) * 8, walk = 4 + r() * 8, dir = r() < 0.5 ? 0 : Math.PI
+      if (!inEden(g + off, along)) person(g + off, 0.15, along, dir, walk, r() < 0.08)
+      if (!inEden(along, g + off)) person(along, 0.15, g + off, dir + Math.PI / 2, walk, r() < 0.08)
+    }
+    // crowds where Kolkata gathers: Eden's gates, the Memorial's paths, the ghat steps, both station forecourts, the bridge footway
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * Math.PI * 2
+      person(EDEN.x + Math.cos(a) * (EDEN.half - 10), 0.19, EDEN.z + Math.sin(a) * (EDEN.half - 10), r() * 6.28, r() < 0.5 ? 3 + r() * 4 : 0, r() < 0.1)
+    }
+    for (let i = 0; i < 18; i++) person(-110 + r() * 220, 0.1, -330 + r() * 90, r() * 6.28, 3 + r() * 6, r() < 0.12)
+    for (let i = 0; i < 16; i++) person(-232 - r() * 12, -r() * 2, GHAT.z0 + 6 + r() * (GHAT.z1 - GHAT.z0 - 12), -Math.PI / 2 + (r() - 0.5) * 0.8, 0, r() < 0.15)
+    for (let i = 0; i < 20; i++) person(-352 + r() * 18, 0.1, -40 + r() * 80, r() * 6.28, r() < 0.6 ? 3 + r() * 5 : 0, r() < 0.1)
+    for (let i = 0; i < 16; i++) person(95 + r() * 80, 0.1, 404 + r() * 10, r() * 6.28, r() < 0.6 ? 3 + r() * 5 : 0, r() < 0.1)
+    for (let i = 0; i < 12; i++) person(-300 + i * 6 + r() * 3, 0.445, (i % 2 ? 1 : -1) * 7.5, (i % 2 ? 1 : -1) * Math.PI / 2, 5 + r() * 6)
     for (const people of cells.values()) {
       const parts = outfits[people[0].look].map(g => {
         const mesh = new THREE.InstancedMesh(g, cloth, people.length)

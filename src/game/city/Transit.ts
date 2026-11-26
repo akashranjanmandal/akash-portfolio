@@ -244,6 +244,9 @@ export class Transit {
         physics.fixedMesh(rail)
         for (const t of [0, 0.5, 1]) b.box(0.07, 1, 0.07, m.rail, M(x + dx, y - t * 20 * rise + 0.46, z + t * length))
       }
+      // Kolkata's elevated entrances are covered: a tin roof follows each flight on slim posts
+      b.add(new THREE.BoxGeometry(width + 0.7, 0.1, span + 1.5), m.corrugated, M(x, y - 10 * rise + 3, z + length / 2).multiply(tilt))
+      for (const dx of [-1.6, 1.6]) for (const t of [0, 1]) b.box(0.12, 2.95, 0.12, m.frame, M(x + dx, y - t * 20 * rise + 1.5, z + t * length))
       if (flight === 2) continue
       const ly = y - 20 * rise, lz = z + length + 0.725
       b.box(width, 0.28, 1.45, m.concrete, M(x, ly - 0.14, lz))

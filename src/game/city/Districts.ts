@@ -311,6 +311,11 @@ function stadium(c: Ctx, cx: number, cz: number) {
   const rise = 0.5
   const run = 0.75
   b.box(2 * (EDEN.half - 3.5), 0.03, 2 * (EDEN.half - 3.5), m.paving, M(cx, CURB + 0.02, cz), 3)
+  // shade trees round the apron, as on the Maidan side of the real ground
+  for (let k = -EDEN.half + 12; k <= EDEN.half - 12; k += 16) for (const s of [-1, 1]) {
+    tree(c, cx + k, cz + s * (EDEN.half - 7), 1.1)
+    tree(c, cx + s * (EDEN.half - 7), cz + k, 1.1)
+  }
 
   // the outfield, mown in broad stripes, with a rope, a 30-yard circle, the pitch and creases
   const cv = document.createElement('canvas')
