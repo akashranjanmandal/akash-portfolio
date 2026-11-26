@@ -62,6 +62,7 @@ export class Transit {
   /** called when the crossing bells ring: position of the crossing */
   onBell?: (pos: THREE.Vector3) => void
   private bellTimer = 0
+  private deckPools: THREE.Mesh | null = null
   private tA = new THREE.Vector3()
   private tB = new THREE.Vector3()
 
@@ -445,8 +446,18 @@ export class Transit {
     asphalt.side = THREE.DoubleSide
     const hw = new THREE.MeshStandardMaterial({ color: '#fff6e0', emissive: '#ffd79a', emissiveIntensity: 0.2 })
     this.glow.push({ mat: hw, day: 0.2, night: 5 })
+    const steel = new THREE.MeshStandardMaterial({ color: '#a9adb1', metalness: 0.85, roughness: 0.35 })
+    const joint = new THREE.MeshStandardMaterial({ color: '#1b1b1d', metalness: 0.6, roughness: 0.5 })
+    const paint = (color: string) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 })
+    const pools: THREE.BufferGeometry[] = []
+    const white = paint('#e8e4d8')
+    const yellow = paint('#e4b42c')
     this.roadSign(-209, -180, 0, ['RING ROAD', 'Flyover entry ↖'])
     this.roadSign(209, -192, -Math.PI / 2, ['CITY EXIT', 'Eastern Bypass ↖'], RING.y)
+    this.gantry(b, -110, -200, ['RING ROAD  →', 'Eden Gardens · Sealdah'], ['HOWRAH BRIDGE  ↓', 'Ghat · Howrah Station'])
+    this.gantry(b, 160, -200, ['EXIT  ↗  50 m', 'Eastern Bypass · Hills'], ['VICTORIA MEMORIAL', 'Park Street  ↓'])
+    this.gantry(b, 400, 120, ['EDEN GARDENS  ↓', 'Sealdah · Maidan'], ['EXIT  ↖', 'Eastern Bypass'])
+    this.gantry(b, 120, 400, ['HOWRAH  ←', 'Ghat · Howrah Bridge'], ['SEALDAH  ↓', 'Eden Gardens'])
     for (const [route, pts] of [ringPath(), rampUp(), rampDown()].entries()) {
       const ring = route === 0
       const entry = route === 1
@@ -478,16 +489,36 @@ export class Transit {
           if (mid.y > 0.7) {
             b.add(wall, m.concrete)
             barriers.push(wall)
+            // a galvanised rail on the crash barrier
+            b.add(sweep(outside, [[-0.05, 0.86], [-0.05, 1.0], [0.05, 1.0], [0.05, 0.86]]), steel)
+            if (i % 2 === 0) b.box(0.06, 0.26, 0.06, steel, M(line[i].x, line[i].y + 0.87, line[i].z))
           }
-          if (mid.y > 3 && i % 10 === 3 && side === -1 && !joining) {
+          if (!ring && mid.y > 3 && i % 10 === 3 && side === -1 && !joining) {
+            // a lamp post on the parapet with its arm reaching out over the ramp
             const lp = line[i]
-            b.box(0.11, 4.5, 0.11, m.frame, M(lp.x, lp.y + 2.25, lp.z))
-            b.box(0.6, 0.12, 0.4, hw, M(lp.x, lp.y + 4.51, lp.z))
+            const lat = new THREE.Vector3(Math.cos(Math.atan2(q.x - p.x, q.z - p.z)), 0, -Math.sin(Math.atan2(q.x - p.x, q.z - p.z)))
+            const tip = lp.clone().addScaledVector(lat, -1.9)
+            b.box(0.14, 8, 0.14, m.frame, M(lp.x, lp.y + 4.75, lp.z))
+            b.box(0.08, 0.08, 2, m.frame, M((lp.x + tip.x) / 2, lp.y + 8.6, (lp.z + tip.z) / 2, Math.atan2(tip.x - lp.x, tip.z - lp.z)))
+            b.box(0.7, 0.14, 0.32, hw, M(tip.x, lp.y + 8.5, tip.z, Math.atan2(q.x - p.x, q.z - p.z)))
           }
         }
         const yaw = Math.atan2(q.x - p.x, q.z - p.z)
         const width = ring ? RING.width : rampWidth(mid.x, entry)
         if (width > 1) b.box(width - 0.45, 0.9, ds + 0.03, m.concrete, M(mid.x, mid.y - 0.52, mid.z, yaw).multiply(new THREE.Matrix4().makeRotationX(-Math.asin((q.y - p.y) / ds))))
+        // expansion joints: a steel finger strip across the deck every 32 m
+        if (i % 8 === 0 && p.y > 1 && width > 1) b.box(width - 0.5, 0.03, 0.32, joint, M(p.x, p.y + 0.006, p.z, yaw + Math.PI / 2), 1)
+        if (ring && i % 10 === 3 && !joining) {
+          // twin-arm lamps standing on the median, the way Kolkata's flyovers are lit
+          const lat = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw))
+          b.box(0.18, 9, 0.18, m.frame, M(mid.x, mid.y + 0.48 + 4.5, mid.z))
+          for (const sd of [-1, 1]) {
+            const tip = mid.clone().addScaledVector(lat, sd * 2.6)
+            b.box(0.08, 0.08, 2.7, m.frame, M((mid.x + tip.x) / 2, mid.y + 9.45, (mid.z + tip.z) / 2, yaw + Math.PI / 2))
+            b.box(0.75, 0.14, 0.34, hw, M(tip.x, mid.y + 9.36, tip.z, yaw))
+            pools.push(new THREE.PlaneGeometry(11, 11).rotateX(-Math.PI / 2).translate(tip.x, mid.y + 0.05, tip.z))
+          }
+        }
         if (ring) {
           b.box(0.38, 0.48, ds + 0.02, m.concrete, M(mid.x, mid.y + 0.24, mid.z, yaw))
           if (i % 2 === 0) for (const side of [-1, 1]) b.box(0.10, 0.018, 2.3, m.line, M(mid.x + Math.cos(yaw) * side * 3.4, mid.y + 0.015, mid.z - Math.sin(yaw) * side * 3.4, yaw))
@@ -496,6 +527,11 @@ export class Transit {
           b.box(1.4, mid.y - 0.8, 1.65, m.concrete, M(mid.x, (mid.y - 0.8) / 2, mid.z, yaw))
           b.box(width - 0.9, 0.65, 2, m.concrete, M(mid.x, mid.y - 1.12, mid.z, yaw))
           physics.fixedBox(mid.x, (mid.y - 0.8) / 2, mid.z, 0.7, (mid.y - 0.8) / 2, 0.825, yaw)
+          // a drain scupper at the deck edge and its downpipe down the pier
+          const lat = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw))
+          const dp = mid.clone().addScaledVector(lat, 0.82)
+          b.add(new THREE.CylinderGeometry(0.08, 0.08, mid.y - 0.9, 8), m.frame, M(dp.x, (mid.y - 0.9) / 2 + 0.1, dp.z))
+          b.box(0.3, 0.2, 0.3, m.frame, M(dp.x, 0.1, dp.z))
         }
         distance += ds
       }
@@ -513,6 +549,61 @@ export class Transit {
         const median = new THREE.Mesh(sweep([...pts, pts[0]], [[-0.19, 0], [-0.19, 0.48], [0.19, 0.48], [0.19, 0]]))
         physics.fixedMesh(median)
       }
+      // painted lines: white edge lines inside both barriers, yellow along the median
+      const close = (a: THREE.Vector3[]) => (ring ? [...a, a[0]] : a).map((v) => v.clone().setY(v.y + 0.02))
+      for (const [line, o] of [[left, 0.55], [right, -0.55]] as const) {
+        const strip = new THREE.Mesh(sweep(close(line), [[o - 0.07, 0], [o + 0.07, 0]], false), white)
+        strip.receiveShadow = true
+        this.group.add(strip)
+      }
+      if (ring) for (const o of [-0.38, 0.38]) this.group.add(new THREE.Mesh(sweep(close(pts), [[o - 0.06, 0], [o + 0.06, 0]], false), yellow))
+    }
+    // pools of lamplight on the deck after dark: one merged additive decal
+    const c = document.createElement('canvas')
+    c.width = c.height = 64
+    const g = c.getContext('2d')!
+    const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+    grd.addColorStop(0, 'rgba(255,210,150,0.75)')
+    grd.addColorStop(0.45, 'rgba(255,190,120,0.25)')
+    grd.addColorStop(1, 'rgba(255,190,120,0)')
+    g.fillStyle = grd
+    g.fillRect(0, 0, 64, 64)
+    this.deckPools = new THREE.Mesh(mergeGeometries(pools)!, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 }))
+    this.deckPools.renderOrder = 1
+    this.deckPools.visible = false
+    this.group.add(this.deckPools)
+  }
+
+  /** an overhead sign gantry across both carriageways of the ring, one board facing each direction of traffic */
+  private gantry(b: Batch, x: number, z: number, cw: string[], ccw: string[]) {
+    const { m, physics } = this
+    const pts = ringPath()
+    let i = 0
+    pts.forEach((p, k) => { if (Math.hypot(p.x - x, p.z - z) < Math.hypot(pts[i].x - x, pts[i].z - z)) i = k })
+    const p = pts[i]
+    const q = pts[(i + 1) % pts.length]
+    const t = new THREE.Vector3(q.x - p.x, 0, q.z - p.z).normalize()
+    const n = new THREE.Vector3(-t.z, 0, t.x)
+    const yaw = Math.atan2(n.x, n.z)
+    const y = p.y
+    const half = RING.width / 2 - 0.4
+    for (const s of [-1, 1]) {
+      const c = p.clone().addScaledVector(n, s * half)
+      b.box(0.35, 7.6, 0.35, m.frame, M(c.x, y + 3.8, c.z))
+      physics.fixedBox(c.x, y + 3.8, c.z, 0.18, 3.8, 0.18)
+    }
+    for (const h of [6.4, 7.5]) b.box(0.18, 0.18, RING.width - 0.4, m.frame, M(p.x, y + h, p.z, yaw))
+    for (let k = -half; k <= half + 0.01; k += 1.6) b.box(0.08, 1.1, 0.08, m.frame, M(p.x + n.x * k, y + 6.95, p.z + n.z * k))
+    // left-hand traffic: clockwise traffic keeps to the side opposite the normal
+    for (const [dir, lines] of [[1, cw], [-1, ccw]] as const) {
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(5.4, 1.9), new THREE.MeshStandardMaterial({ map: labelTexture(lines, '#0e5a2e', '#ffffff', 1024, 360, '#ffffff'), roughness: 0.6, emissive: '#ffffff', emissiveIntensity: 0.06 }))
+      const c = p.clone().addScaledVector(n, -dir * 3.25).addScaledVector(t, -dir * 0.2)
+      const bm = board.material as THREE.MeshStandardMaterial
+      bm.emissiveMap = bm.map
+      this.glow.push({ mat: bm, day: 0.06, night: 0.8 })
+      board.position.set(c.x, y + 6.95, c.z)
+      board.rotation.y = Math.atan2(-dir * t.x, -dir * t.z)
+      this.group.add(board)
     }
   }
 
@@ -616,5 +707,9 @@ export class Transit {
       }
     }
     for (const g of this.glow) g.mat.emissiveIntensity = night > 0.3 ? g.night * night : g.day
+    if (this.deckPools) {
+      this.deckPools.visible = night > 0.3
+      ;(this.deckPools.material as THREE.MeshBasicMaterial).opacity = night * 0.8
+    }
   }
 }

@@ -124,6 +124,7 @@ export class GameApp {
       g.input.enabled = true
     }
     this.worldMap.onPick = (id) => this.setWaypoint(id)
+    g.characters.onGreet = (icon, text) => this.toasts.show(icon, text, 4200)
     g.world.transit.onBell = (pos) => this.audio.tramBell(Math.max(0, 1 - pos.distanceTo(g.player.position) / 160))
     const tram = g.world.town.tram
     if (tram) tram.onBell = (pos) => this.audio.tramBell(Math.max(0, 1 - pos.distanceTo(g.player.position) / 140))
@@ -278,7 +279,15 @@ export class GameApp {
     if (v) $('speed-num').textContent = String(Math.round(Math.abs(v.speed) * 3.6))
     if (v?.kind === 'car') this.audio.setVoice((v as import('./game/Vehicles').Car).profile.name)
     this.audio.setAltitude(g.region === 'hills' ? clamp(focus.y / 700) : 0)
-    this.audio.update(v?.kind === 'car' ? v.speed : 0, v?.kind === 'car' ? Math.min(1, Math.abs(g.input.move.y)) : 0, false, v?.kind === 'car', g.env.night)
+    const car = v?.kind === 'car' ? (v as import('./game/Vehicles').Car) : null
+    let slip = 0
+    if (car) {
+      // sideways speed: the part of the velocity across the car's heading
+      const lv = car.body.linvel()
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(car.body.rotation() as THREE.Quaternion)
+      slip = Math.abs(lv.x * fwd.z - lv.z * fwd.x)
+    }
+    this.audio.update(car ? car.speed : 0, car ? Math.max(0, g.input.move.y * Math.sign(car.speed || 1)) : 0, !!g.input.sprint, !!car, g.env.night, slip, car ? car.profile.boost : 0)
     // footsteps keep time with the stride
     const gait = p.gait
     if (!v && gait.grounded && gait.speed > 0.6) {

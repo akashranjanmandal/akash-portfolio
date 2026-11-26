@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 
 /* Trees: full meshes near the player, camera-facing impostors further
    away. The impostor texture is rendered from the real model at load
@@ -189,5 +190,97 @@ export class Forest {
       for (const m of c.near) m.visible = near
       for (const m of c.far.userData.all as THREE.InstancedMesh[]) m.visible = !near
     }
+  }
+}
+
+/** a clump of grass: three crossed cards with a painted blade texture */
+function grassClump() {
+  const cv = document.createElement('canvas')
+  cv.width = cv.height = 128
+  const g = cv.getContext('2d')!
+  for (let i = 0; i < 90; i++) {
+    const x = 4 + Math.random() * 120
+    const h = 40 + Math.random() * 86
+    const lean = (Math.random() - 0.5) * 30
+    const k = Math.random()
+    // dry olive to fresh green, darker at the root
+    const grd = g.createLinearGradient(0, 128, 0, 128 - h)
+    grd.addColorStop(0, `rgb(${40 + k * 20}, ${55 + k * 25}, ${25 + k * 10})`)
+    grd.addColorStop(1, `rgb(${105 + k * 50}, ${125 + k * 45}, ${55 + k * 20})`)
+    g.fillStyle = grd
+    g.beginPath()
+    g.moveTo(x - 1.4, 128)
+    g.quadraticCurveTo(x + lean * 0.3, 128 - h * 0.6, x + lean, 128 - h)
+    g.lineTo(x + 1.4, 128)
+    g.fill()
+  }
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  const mat = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9 })
+  const parts: THREE.BufferGeometry[] = []
+  for (let k = 0; k < 3; k++) parts.push(new THREE.PlaneGeometry(0.55, 0.3).translate(0, 0.15, 0).rotateY((k * Math.PI) / 3))
+  const geo = mergeGeometries(parts)!
+  // bend normals upwards so the cards shade like a lawn, not like walls
+  const n = geo.attributes.normal as THREE.BufferAttribute
+  for (let i = 0; i < n.count; i++) n.setXYZ(i, n.getX(i) * 0.3, 1, n.getZ(i) * 0.3)
+  geo.normalizeNormals()
+  return { geo, mat }
+}
+
+/** grass clumps on lawns, built lazily in 30 m cells and shown only near the player */
+export class GrassField {
+  readonly group = new THREE.Group()
+  private cells = new Map<string, THREE.InstancedMesh | null>()
+  private clump = grassClump()
+  private lastCell = ''
+  private pending = false
+  constructor(private grassy: (x: number, z: number) => boolean, private perCell: number, private y: number, private radius = 60) {}
+
+  update(player: THREE.Vector3) {
+    if (this.perCell <= 0) return
+    const C = 30
+    const cell = `${Math.floor(player.x / 10)},${Math.floor(player.z / 10)}`
+    if (cell === this.lastCell && !this.pending) return
+    this.lastCell = cell
+    // build the missing cells nearest first, three per frame, until the area round the player is done
+    const r0 = Math.ceil(this.radius / C)
+    const pcx = Math.floor(player.x / C)
+    const pcz = Math.floor(player.z / C)
+    const todo: [number, number, number][] = []
+    for (let i = -r0; i <= r0; i++) for (let j = -r0; j <= r0; j++) if (!this.cells.has(`${pcx + i},${pcz + j}`)) todo.push([i * i + j * j, pcx + i, pcz + j])
+    todo.sort((a, b) => a[0] - b[0])
+    for (const [, x, z] of todo.slice(0, 3)) this.cells.set(`${x},${z}`, this.build(x, z, C))
+    this.pending = todo.length > 3
+    for (const [key, mesh] of this.cells) {
+      if (!mesh) continue
+      const [cx, cz] = key.split(',').map(Number)
+      mesh.visible = Math.hypot((cx + 0.5) * C - player.x, (cz + 0.5) * C - player.z) < this.radius + C * 0.7
+    }
+  }
+
+  private build(cx: number, cz: number, C: number) {
+    let seed = (cx * 73856093) ^ (cz * 19349663)
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+    const m: THREE.Matrix4[] = []
+    const q = new THREE.Quaternion()
+    const up = new THREE.Vector3(0, 1, 0)
+    for (let k = 0; k < this.perCell; k++) {
+      const x = (cx + rnd()) * C
+      const z = (cz + rnd()) * C
+      if (!this.grassy(x, z)) continue
+      const s = 0.7 + rnd() * 0.8
+      m.push(new THREE.Matrix4().compose(new THREE.Vector3(x, this.y, z), q.setFromAxisAngle(up, rnd() * 6.28), new THREE.Vector3(s, s * (0.8 + rnd() * 0.5), s)))
+    }
+    if (!m.length) return null
+    const inst = new THREE.InstancedMesh(this.clump.geo, this.clump.mat, m.length)
+    const col = new THREE.Color()
+    m.forEach((mx, i) => {
+      inst.setMatrixAt(i, mx)
+      inst.setColorAt(i, col.setHSL(0.2 + rnd() * 0.06, 0.25 + rnd() * 0.15, 0.55 + rnd() * 0.2))
+    })
+    inst.receiveShadow = true
+    inst.computeBoundingSphere()
+    this.group.add(inst)
+    return inst
   }
 }

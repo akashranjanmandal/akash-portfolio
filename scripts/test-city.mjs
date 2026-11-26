@@ -162,6 +162,8 @@ try {
       if (p.x < 256) p.z += (256 - p.x) / 48 * 3.8
       route.push(p)
     }
+    // the render loop is stopped, so traffic stands still: park it out of the way
+    for (const d of g.world.traffic.drivers) d.body.setTranslation({ x: 0, y: -200, z: 0 }, true)
     v.teleport(route[0], 0)
     g.player.mount(v)
     const input = { move: { x: 0, y: 0 }, sprint: false, brake: false }

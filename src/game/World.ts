@@ -3,7 +3,7 @@ import { RAPIER, type Physics } from './Physics'
 import type { Assets } from './Assets'
 import type { Quality } from './Engine'
 import { noise2, rng } from '../utils/math'
-import { Forest } from './Foliage'
+import { Forest, GrassField } from './Foliage'
 import { Town } from './city/Town'
 import { Howrah, riverDepth, STATION } from './city/Howrah'
 import { Traffic, kerbSpots } from './Traffic'
@@ -122,6 +122,7 @@ export class World {
   spawn = { pos: new THREE.Vector3(SPAWN.x, 0.2, SPAWN.z), yaw: SPAWN.yaw }
   private sea!: THREE.Mesh
   forest: Forest | null = null
+  grass: GrassField | null = null
   town!: Town
   landmarks!: Landmarks
   howrah!: Howrah
@@ -327,18 +328,39 @@ export class World {
         }
       }
     }
-    trees1.push(...avenue, ...this.town.districts.trees.filter(m => !metroClearance(m.elements[12], m.elements[14], 4) && railDist(m.elements[12], m.elements[14]) > 12))
+    // the jacaranda is a full-crowned broadleaf (a 19 m model, scaled to a city street tree): avenues, districts and a share of the parks
+    const jacSrc = this.assets.models.get('jacaranda_tree')?.scene
+    const jac = jacSrc ? new THREE.Group().add(jacSrc) : null
+    jac?.scale.setScalar(0.4)
+    const broad = [...avenue, ...this.town.districts.trees.filter(m => !metroClearance(m.elements[12], m.elements[14], 4) && railDist(m.elements[12], m.elements[14]) > 12)]
+    // island_tree_01 is bare and twiggy: once the jacaranda is loaded it takes all of its spots
+    const parkBroad = jac ? trees1 : []
+    const trees1Rest = trees1.filter((m) => !parkBroad.includes(m))
+    if (!jac) trees1Rest.push(...broad)
     if (tree1 && tree2) {
-      this.forest = new Forest(this.renderer, this.scene.environment, [tree1, tree2], [
-        ...trees1.map((matrix) => ({ model: 0, matrix })),
-        ...trees2.map((matrix) => ({ model: 1, matrix })),
+      this.forest = new Forest(this.renderer, this.scene.environment, jac ? [tree1, tree2, jac] : [tree1, tree2], [
+        ...trees1Rest.map((matrix) => ({ model: 0, matrix })),
+        // island_tree_02 is sparse and scrubby: right for the dry outskirts, not for the town
+        ...trees2.filter((m) => !jac || !inTown(m.elements[12], m.elements[14], 30)).map((matrix) => ({ model: 1, matrix })),
+        ...(jac ? [...broad, ...parkBroad, ...trees2.filter((m) => inTown(m.elements[12], m.elements[14], 30))].map((matrix) => ({ model: 2, matrix })) : []),
       ], this.quality.tier === 'high' ? 45 : this.quality.tier === 'mid' ? 28 : -1)
       this.group.add(this.forest.group)
     }
-    for (const m of [...trees1, ...trees2]) {
+    for (const m of [...trees1, ...trees2, ...(jac ? broad : [])]) {
       const p = new THREE.Vector3().setFromMatrixPosition(m)
       this.physics.fixedCylinder(p.x, p.y + 2, p.z, 0.5, 4)
     }
+    // tufts of grass on the block lawns near the player
+    const lawn = (x: number, z: number) => {
+      const bx = ((x % 100) + 100) % 100 - 50
+      const bz = ((z % 100) + 100) % 100 - 50
+      if (!inTown(x, z) || Math.abs(bx) > 40.5 || Math.abs(bz) > 40.5 || districtAt(x, z) || metroClearance(x, z, 4)) return false
+      if (this.town.buildingClearances.some(o => Math.hypot(o.x - x, o.z - z) < o.r + 1)) return false
+      if (laneDist(x, z) < 3.5) return false
+      return !plots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)
+    }
+    this.grass = new GrassField(lawn, this.quality.tier === 'high' ? 800 : this.quality.tier === 'mid' ? 450 : 0, 0.17, this.quality.tier === 'high' ? 50 : 35)
+    this.group.add(this.grass.group)
     const shrubs = pick(Math.round(260 * d), offRoad, 1.4)
     const shrub = this.assets.models.get('shrub_01')?.scene
     if (shrub) instanceModel(this.group, shrub, shrubs, false)
@@ -361,6 +383,7 @@ export class World {
     const tram = this.town.tram?.group.position
     this.traffic.update(dt, player, tram ? [...this.obstacles, tram] : this.obstacles, this.night)
     this.forest?.update(player)
+    this.grass?.update(player)
     this.landmarks.update(t, this.night, player)
     this.howrah.update(this.night)
     this.fairy.update(t, this.night)

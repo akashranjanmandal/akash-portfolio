@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import * as BufferUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Physics } from '../Physics'
 import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
@@ -136,6 +137,67 @@ function awningMaterial() {
   t.colorSpace = THREE.SRGBColorSpace
   t.wrapS = t.wrapT = THREE.RepeatWrapping
   return new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, side: THREE.DoubleSide })
+}
+
+/** cast-iron drain grate: dark bars over a black sump */
+function grateTexture() {
+  const c = document.createElement('canvas')
+  c.width = c.height = 32
+  const g = c.getContext('2d')!
+  g.fillStyle = '#0b0b0c'
+  g.fillRect(0, 0, 32, 32)
+  g.fillStyle = '#3c3d40'
+  g.fillRect(0, 0, 32, 3)
+  g.fillRect(0, 29, 32, 3)
+  for (let x = 0; x < 32; x += 6) g.fillRect(x, 0, 3, 32)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
+/* ── Kolkata's trident street light ─────────────────────────── */
+
+const tridentWhite = new THREE.MeshStandardMaterial({ color: '#e9edf0', roughness: 0.4, metalness: 0.5 })
+
+/** blue and white bands up the pole, the city's signature paint */
+function tridentPaint() {
+  const c = document.createElement('canvas')
+  c.width = 4
+  c.height = 64
+  const g = c.getContext('2d')!
+  g.fillStyle = '#f2f4f6'
+  g.fillRect(0, 0, 4, 64)
+  g.fillStyle = '#2f7fd0'
+  for (let y = 0; y < 64; y += 16) g.fillRect(0, y, 4, 8)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapT = THREE.RepeatWrapping
+  t.repeat.set(1, 4)
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.45, metalness: 0.3 })
+}
+
+/** a 7.8 m pole with two upswept arms and three lanterns (centre one on top), split by material */
+function tridentLamp() {
+  const { mergeGeometries } = BufferUtils
+  const at = (g: THREE.BufferGeometry, x: number, y: number, z: number, rz = 0) => g.rotateZ(rz).translate(x, y, z)
+  const paint = new THREE.CylinderGeometry(0.075, 0.11, 7.2, 12).translate(0, 4.1, 0)
+  const white: THREE.BufferGeometry[] = [new THREE.CylinderGeometry(0.2, 0.24, 0.5, 12).translate(0, 0.25, 0)]
+  const glass: THREE.BufferGeometry[] = []
+  const lantern = [[0.04, 0], [0.15, 0.08], [0.19, 0.26], [0.15, 0.44], [0.05, 0.5]].map(([r, h]) => new THREE.Vector2(r, h))
+  const heads: [number, number][] = [[0, 7.75], [-0.9, 7.35], [0.9, 7.35]]
+  for (const [x, y] of heads) {
+    glass.push(at(new THREE.LatheGeometry(lantern, 10), x, y, 0))
+    white.push(at(new THREE.ConeGeometry(0.23, 0.2, 10), x, y + 0.6, 0), at(new THREE.CylinderGeometry(0.06, 0.08, 0.12, 8), x, y - 0.04, 0))
+    white.push(at(new THREE.SphereGeometry(0.04, 6, 4), x, y + 0.75, 0))
+  }
+  for (const s of [-1, 1]) white.push(at(new THREE.BoxGeometry(1.05, 0.06, 0.06), s * 0.46, 7.12, 0, s * 0.42))
+  white.push(new THREE.CylinderGeometry(0.1, 0.1, 0.25, 10).translate(0, 7.6, 0))
+  const strip = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g)
+  return {
+    paint,
+    white: mergeGeometries(white.map(strip)),
+    glass: mergeGeometries(glass.map(strip)),
+  }
 }
 
 export function townMaterials(a: Assets) {
@@ -401,6 +463,13 @@ export class Town {
     b.box(side, CURB, side, m.pavement, M(EDEN.x, CURB / 2, EDEN.z))
     this.physics.fixedBox(EDEN.x, CURB / 2, EDEN.z, EDEN.half, CURB / 2, EDEN.half)
     const size = 100 - ROAD_W
+    const lawn = (m.grass as THREE.MeshStandardMaterial).clone()
+    lawn.color = new THREE.Color('#a9c98d')
+    const edging = new THREE.MeshStandardMaterial({ color: '#b7b2a8', roughness: 0.9 })
+    const gutter = (m.concrete as THREE.MeshStandardMaterial).clone()
+    gutter.color = new THREE.Color('#8d8a84')
+    const grime = new THREE.MeshStandardMaterial({ color: '#000000', transparent: true, opacity: 0.22, depthWrite: false, roughness: 1 })
+    const grate = new THREE.MeshStandardMaterial({ map: grateTexture(), color: '#ffffff', roughness: 0.6, metalness: 0.7 })
     for (let i = 0; i < GRID.length - 1; i++) {
       for (let j = 0; j < GRID.length - 1; j++) {
         const cx = (GRID[i] + GRID[i + 1]) / 2
@@ -413,7 +482,27 @@ export class Town {
           b.box(size + 0.3, CURB + 0.02, 0.3, m.kerb, M(cx + dx, (CURB + 0.02) / 2, cz + dz, yaw), 1)
         }
         const inner = size - WALK_W * 2
-        if (!districtAt(cx, cz)) b.box(inner, 0.02, inner, m.grass, M(cx, CURB + 0.01, cz), 6)
+        if (!districtAt(cx, cz)) {
+          b.box(inner, 0.02, inner, lawn, M(cx, CURB + 0.01, cz), 6)
+          // a concrete edging stone where the pavement meets the planted ground
+          for (const [dx, dz, yaw] of [[0, inner / 2, 0], [0, -inner / 2, 0], [inner / 2, 0, Math.PI / 2], [-inner / 2, 0, Math.PI / 2]]) b.box(inner + 0.2, 0.08, 0.16, edging, M(cx + dx, CURB + 0.04, cz + dz, yaw), 1)
+        }
+        // road side of every kerb: a concrete gutter channel with drain grates, a grimy worn strip, and a solid edge line
+        for (const [nx, nz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+          const yaw = nx !== 0 ? Math.PI / 2 : 0
+          const at = (o: number) => [cx + nx * (size / 2 + o), cz + nz * (size / 2 + o)] as const
+          const [gx, gz] = at(0.42)
+          b.box(size, 0.012, 0.5, gutter, M(gx, 0.03, gz, yaw), 1)
+          const [wx, wz] = at(1.3)
+          b.box(size, 0.004, 1.3, grime, M(wx, 0.027, wz, yaw), 4)
+          const [lx, lz] = at(1.05)
+          b.box(size - 2, 0.006, 0.12, m.line, M(lx, 0.034, lz, yaw), 1)
+          for (let t = -size / 2 + 8; t < size / 2 - 4; t += 16) {
+            const ox = nx !== 0 ? 0 : t
+            const oz = nx !== 0 ? t : 0
+            b.box(0.42, 0.02, 0.9, grate, M(gx + ox, 0.035, gz + oz, yaw + Math.PI / 2), 0.45)
+          }
+        }
         this.physics.fixedBox(cx, CURB / 2, cz, size / 2, CURB / 2, size / 2)
       }
     }
@@ -535,9 +624,9 @@ export class Town {
   }
 
   private lamps() {
-    const lamp = this.assets.models.get('street_lamp_01')?.scene
-    if (!lamp) return
-    const mats: THREE.Matrix4[] = []
+    // main streets: Kolkata's blue-and-white trident posts; parks and lanes keep the heritage lantern
+    const street: THREE.Matrix4[] = []
+    const heritage: THREE.Matrix4[] = []
     const edge = 50 - ROAD_W / 2 - 0.8
     for (let i = 0; i < GRID.length - 1; i++) {
       for (let j = 0; j < GRID.length - 1; j++) {
@@ -546,7 +635,7 @@ export class Town {
         for (const t of [-34, -12, 12, 34]) {
           for (const [px, pz, yaw] of [[cx + t, cz + edge, 0], [cx + t, cz - edge, Math.PI], [cx + edge, cz + t, Math.PI / 2], [cx - edge, cz + t, -Math.PI / 2]] as const) {
             if (metroClearance(px, pz, 0.6) || (inEden(px, pz) && Math.max(Math.abs(px - EDEN.x), Math.abs(pz - EDEN.z)) < EDEN.half - 2)) continue
-            mats.push(M(px, CURB, pz, yaw, 1.6, 1.6, 1.6))
+            street.push(M(px, CURB, pz, yaw))
             this.lampPositions.push(new THREE.Vector3(px, 0, pz))
             this.physics.fixedCylinder(px, 2.5, pz, 0.18, 5)
           }
@@ -554,42 +643,47 @@ export class Town {
       }
     }
     for (const [px, pz, yaw] of this.districts.lamps) {
-      mats.push(M(px, CURB, pz, yaw, 1.6, 1.6, 1.6))
+      heritage.push(M(px, CURB, pz, yaw, 1.6, 1.6, 1.6))
       this.lampPositions.push(new THREE.Vector3(px, 0, pz))
       this.physics.fixedCylinder(px, 2.5, pz, 0.18, 5)
     }
+    const glass = new THREE.MeshStandardMaterial({ color: '#f4efe2', roughness: 0.25, emissive: '#ffc979', emissiveIntensity: 0 })
+    this.lampGlass = glass
+    const parts = tridentLamp()
+    this.instanceCells([[parts.paint, tridentPaint()], [parts.white, tridentWhite], [parts.glass, glass]], street)
+    const lamp = this.assets.models.get('street_lamp_01')?.scene
+    if (!lamp) return
     lamp.updateMatrixWorld(true)
+    const list: [THREE.BufferGeometry, THREE.Material][] = []
     lamp.traverse((o) => {
       const mesh = o as THREE.Mesh
       if (!mesh.isMesh) return
-      let material = mesh.material as THREE.MeshStandardMaterial
-      if (/glass/i.test(material.name)) {
-        // the lantern glass becomes the light source after dark
-        material = material.clone()
-        material.emissive = new THREE.Color('#ffc979')
-        material.emissiveIntensity = 0
-        material.transparent = false
-        material.opacity = 1
-        this.lampGlass = material
-      }
-      // one InstancedMesh per 100 m cell, so lamps far from the camera are culled (and skip the shadow pass)
-      const cells = new Map<string, THREE.Matrix4[]>()
-      const pos = new THREE.Vector3()
-      for (const mat of mats) {
-        pos.setFromMatrixPosition(mat)
-        const key = `${Math.floor(pos.x / 100)},${Math.floor(pos.z / 100)}`
-        let arr = cells.get(key)
-        if (!arr) cells.set(key, (arr = []))
-        arr.push(mat)
-      }
+      const g = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld)
+      list.push([g, /glass/i.test((mesh.material as THREE.Material).name) ? glass : (mesh.material as THREE.Material)])
+    })
+    this.instanceCells(list, heritage)
+  }
+
+  /** one InstancedMesh per material per 100 m cell, so lamps far from the camera are culled (and skip the shadow pass) */
+  private instanceCells(parts: [THREE.BufferGeometry, THREE.Material][], mats: THREE.Matrix4[]) {
+    const cells = new Map<string, THREE.Matrix4[]>()
+    const pos = new THREE.Vector3()
+    for (const mat of mats) {
+      pos.setFromMatrixPosition(mat)
+      const key = `${Math.floor(pos.x / 100)},${Math.floor(pos.z / 100)}`
+      let arr = cells.get(key)
+      if (!arr) cells.set(key, (arr = []))
+      arr.push(mat)
+    }
+    for (const [geo, material] of parts) {
       for (const list of cells.values()) {
-        const inst = new THREE.InstancedMesh(mesh.geometry, material, list.length)
-        list.forEach((mat, k) => inst.setMatrixAt(k, mat.clone().multiply(mesh.matrixWorld)))
-        inst.castShadow = true
+        const inst = new THREE.InstancedMesh(geo, material, list.length)
+        list.forEach((mat, k) => inst.setMatrixAt(k, mat))
+        inst.castShadow = material !== this.lampGlass
         inst.computeBoundingSphere()
         this.group.add(inst)
       }
-    })
+    }
   }
 
   private lampGlass: THREE.MeshStandardMaterial | null = null

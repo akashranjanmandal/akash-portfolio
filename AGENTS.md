@@ -68,6 +68,11 @@ Coordinates: metres, x east, z south (so -z is north), y up. Grid lines every 10
 
 ## What has been built (all on this branch)
 
+- **Named characters** (`city/Characters.ts`, name tag within 16 m + hello toast): Suprime (CEO) and Subhodeep (CTO) at GOBT, Harshit and Yuvraj at Xeta Labs, Souvik as the player's companion (follows on foot, hides while driving, no collider), Panda riding a scooty round the inner blocks from home.
+- **GOBT HQ**: walk-in podium under a 12-storey curtain-wall tower with lit crown, garden and flags; lobby with terrazzo, oak slats, green wall, pendants, video wall. **Xeta Labs**: dark studio with a cantilevered teal-finned box, roof terrace, hack tables, meeting pod.
+- Streets: Kolkata trident lamps, gutters with drain grates, edging stones, greener verges; jacaranda street trees (thinned by `scripts/thin-foliage.mjs`, re-run after `fetch-assets`) and generated grass clumps near the player (off on low).
+- Flyover detail: expansion joints, parapet rails, median lamps, pier downpipes, lit overhead gantry signs.
+- Audio/movement: rpm + gearbox engine synth with turbo/intake/tyre/skid layers (`VOICES` in `AudioEngine.ts`, live readout `__app.audio.state`); player inertia, turn damping, speed-matched walk/run.
 - People: ~700 instanced pedestrians (`Pedestrians.ts`) on every pavement, station platforms and forecourts, Eden apron, Memorial paths, ghat steps and the bridge footway.
 - Scale-correct town (character, doors, floors, roads share `Scale.ts`), enterable Xeta Labs office, GOBT campus and home, project buildings per `Plan.ts`, phone UI, minimap and full map (map marker follows the vehicle when driving).
 - Day / golden / night cycle, glowing lamps, fairy lights, procedural star sky.
@@ -93,9 +98,8 @@ Placement rule learned the hard way: buildings are spaced with a circle of radiu
 - Portals to friends' worlds (needs their URLs; same stack).
 - Ring flyover: verify a steered drive up the ramp and onto the ring end to end; consider traffic entering from the ramps.
 - Stadium: an even larger footprint would need closing two grid roads; Eden's Burmese pagoda is not built.
-- Realism backlog the user flagged (do in this order): GOBT office as a top-notch hero building; filler buildings have blank rear walls (perf choice `sides: false`), give them windows or real backs; tree and grass assets look stylised (swap to better GLB/foliage); road edges vs ground need kerb/verge texture; lamps and flyover need detail (expansion joints, drainage, signage); car engine sound and character movement feel.
+- Realism backlog done in the Nov 2026 pass (GOBT, building backs, trees/grass, kerbs, flyover, lamps, sound, movement); next candidates: Sealdah and Howrah forecourts, Howrah Bridge proportions, high-tier fps re-check.
 - Narrow lanes only exist in 9 of 36 blocks (plots and districts reject the rest).
-- Production deploy is still the draft site until the user approves.
 
 ## Conventions
 

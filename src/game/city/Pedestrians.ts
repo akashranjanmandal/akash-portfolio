@@ -12,8 +12,8 @@ const fabrics = ['#16797a', '#e4bb68', '#a85050', '#6d8397', '#36566f', '#e0d5bc
 const hair = ['#282322', '#28201f', '#3f3029', '#d2c4ad', '#201d1c', '#535053']
 
 // Bake each outfit once. Limbs have local pivots, so the whole crowd shares five instanced draws per outfit and area.
-function outfit(style: number) {
-  const skin = skins[style], top = fabrics[style], pants = ['#393e47', '#c8a478', '#625452'][style % 3]
+export function outfit(style: number, look: { top?: string; pants?: string; skin?: string; hair?: string; kind?: 'plain' | 'sari' | 'kurta' | 'backpack' } = {}) {
+  const skin = look.skin ?? skins[style], top = look.top ?? fabrics[style], pants = look.pants ?? ['#393e47', '#c8a478', '#625452'][style % 3]
   const shapes: THREE.BufferGeometry[][] = Array.from({ length: 5 }, () => [])
   function piece(part: number, geo: THREE.BufferGeometry, x: number, y: number, z: number, color: string, sx = 1, sy = 1, sz = 1, tilt = 0) {
     const g = geo.index ? geo.toNonIndexed() : geo
@@ -29,12 +29,13 @@ function outfit(style: number) {
     piece(part, new THREE.LatheGeometry(profile.map(([r, h]) => new THREE.Vector2(r, h)), 12), x, y, z, color, 1, 1, depth)
   }
   const ball = () => new THREE.SphereGeometry(1, 12, 9)
-  const sari = style === 0 || style === 2
-  const tunic = style === 3 || style === 5
+  const sari = look.kind ? look.kind === 'sari' : style === 0 || style === 2
+  const tunic = look.kind ? look.kind === 'kurta' : style === 3 || style === 5
+  const pack = look.kind ? look.kind === 'backpack' : style === 4 || style === 1
   form(0, [[0.13, 0.76], [0.182, 0.89], [0.15, 1.04], [0.202, 1.32], [0.185, 1.4], [0.075, 1.45]], 0, 0, 0, top, 0.7)
   form(0, [[0.07, 1.4], [0.068, 1.52]], 0, 0, 0, skin)
   piece(0, ball(), 0, 1.595, 0.01, skin, 0.106, 0.147, 0.105)
-  piece(0, ball(), 0, 1.641, -0.012, hair[style], 0.11, 0.112, 0.103)
+  piece(0, ball(), 0, 1.641, -0.012, look.hair ?? hair[style], 0.11, 0.112, 0.103)
   piece(0, ball(), 0, 1.589, 0.105, skin, 0.027, 0.035, 0.028)
   for (const side of [-1, 1]) {
     piece(0, ball(), side * 0.04, 1.614, 0.104, '#38302b', 0.013, 0.007, 0.005)
@@ -48,7 +49,7 @@ function outfit(style: number) {
       piece(0, ball(), 0, 1.55, -0.102, hair[style], 0.078, 0.079, 0.061)
     }
   }
-  if (style === 4 || style === 1) {
+  if (pack) {
     piece(0, ball(), 0, 1.18, -0.16, '#424750', 0.15, 0.205, 0.085)
     for (const side of [-1, 1]) piece(0, ball(), side * 0.103, 1.29, 0.09, '#484945', 0.025, 0.15, 0.02)
   }
@@ -59,7 +60,7 @@ function outfit(style: number) {
     form(arm, [[0.047, -0.24], [0.064, -0.13], [0.067, -0.04], [0.04, 0.016]], 0, 0, 0, top)
     form(arm, [[0.032, -0.51], [0.05, -0.34], [0.047, -0.22]], 0, 0, 0.012, skin)
     piece(arm, ball(), 0, -0.546, 0.022, skin, 0.035, 0.055, 0.03)
-    if (style === 5 && side === 1) piece(arm, new THREE.BoxGeometry(0.095, 0.25, 0.29), 0.02, -0.71, 0.04, '#764d32')
+    if (!look.kind && style === 5 && side === 1) piece(arm, new THREE.BoxGeometry(0.095, 0.25, 0.29), 0.02, -0.71, 0.04, '#764d32')
   }
   return shapes.map(parts => mergeGeometries(parts)!)
 }

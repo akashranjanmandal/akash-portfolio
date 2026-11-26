@@ -7,6 +7,7 @@ import { Physics } from './Physics'
 import { Input } from './Input'
 import { Player } from './Player'
 import { World } from './World'
+import { Characters } from './city/Characters'
 import { Car, Bike, nearestVehicle, type Vehicle } from './Vehicles'
 import { PLOTS, plotToWorld, plotFrame } from './city/Plan'
 import { ESTATE } from './city/Landmarks'
@@ -14,7 +15,7 @@ import { GARAGE, buildSupercar } from './Supercar'
 import * as THREE from 'three'
 
 export const MODELS = [
-  'man', 'xbot-anims', 'bike', 'tram', 'car-bugatti', 'car-jesko', 'car-lambo', 'car-bmw', 'bungalow', 'office', 'campus', 'island_tree_01', 'island_tree_02', 'street_lamp_01', 'shrub_01', 'shrub_03',
+  'man', 'xbot-anims', 'bike', 'tram', 'car-bugatti', 'car-jesko', 'car-lambo', 'car-bmw', 'bungalow', 'island_tree_01', 'island_tree_02', 'jacaranda_tree', 'street_lamp_01', 'shrub_01', 'shrub_03',
   'rollershutter_door', 'painted_wooden_bench', 'metal_trash_can', 'fire_hydrant', 'planter_box_01', 'concrete_road_barrier', 'potted_plant_01',
 ]
 export const IMAGES = ['picaku', 'lifeapp', 'pizzahap', 'gobt', 'gharkamali', 'altaqwa', 'accurateastro', 'mastermind', 'gftd', 'agile', 'ideashapers']
@@ -40,6 +41,7 @@ export class Game {
   onPrompt?: (text: string | null) => void
   /** the hills: built the first time you go through the tunnel */
   hills!: Hills
+  characters!: Characters
   region: 'city' | 'hills' = 'city'
   /** the screen fades out while the region changes, then back in */
   onTransition?: (phase: 'out' | 'in', to: 'city' | 'hills') => void
@@ -75,6 +77,8 @@ export class Game {
     // one physics step so the controller has a ground contact before the first frame
     this.physics.world.step()
     this.world.populate()
+    this.characters = new Characters(this.physics)
+    this.engine.scene.add(this.characters.group)
     await this.engine.renderer.compileAsync(this.engine.scene, this.engine.camera)
     onProgress(1)
   }
@@ -159,6 +163,7 @@ export class Game {
     const showCars = this.engine.quality.tier === 'high' ? 240 : this.engine.quality.tier === 'mid' ? 170 : 120
     for (const v of this.vehicles) v.root.visible = v === p.vehicle || Math.hypot(v.position.x - focus.x, v.position.z - focus.z) < showCars
     this.checkPortals(focus, dt)
+    this.characters.update(dt, t, p, this.region, this.world.traffic.positions)
     if (this.region === 'city') this.world.update(dt, t, focus)
     else this.hills.update(dt, t, this.engine.camera.position, focus, this.env.haze, this.env.alpenglow, this.env.night)
   }

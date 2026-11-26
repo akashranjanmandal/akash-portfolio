@@ -260,7 +260,7 @@ function solid(ctx: Ctx, lx: number, ly: number, lz: number, w: number, h: numbe
 const nightGlass: THREE.MeshStandardMaterial[] = []
 
 /** a curtain-wall texture covering 8 bays × 4 floors (14.4 m square), so lit windows do not repeat floor by floor */
-function curtainWall(seed: number) {
+function curtainWall(seed: number, hi = '#3e6680', lo = '#1d3142') {
   const r = rng(seed)
   const N = 512
   const make = (lit: boolean) => {
@@ -279,8 +279,8 @@ function curtainWall(seed: number) {
         g.fillRect(x + 3, y + 3, bw - 6, fh * 0.78 - 3)
       } else {
         const grd = g.createLinearGradient(x, y, x + bw, y + fh)
-        grd.addColorStop(0, '#3e6680')
-        grd.addColorStop(1, '#1d3142')
+        grd.addColorStop(0, hi)
+        grd.addColorStop(1, lo)
         g.fillStyle = grd
         g.fillRect(x + 3, y + 3, bw - 6, fh * 0.78 - 3)
         g.fillStyle = '#9aa3ab'
@@ -363,6 +363,169 @@ function flags(c: Ctx, x: number, z: number) {
     b.box(0.14, 9, 0.14, m.frame, c.at(px, 4.5, z))
     cols.forEach((col, k) => b.box(0.03, 0.45, 2.2, new THREE.MeshStandardMaterial({ color: col, side: THREE.DoubleSide }), c.at(px, 8.6 - k * 0.45, z - 1.15, Math.PI / 2)))
   })
+}
+
+/** a canvas "screen" for monitors and video walls: code columns or a dashboard, in Xeta's teal */
+function xetaScreen(kind: 'code' | 'wall', seed: number) {
+  const r = rng(seed)
+  const cv = document.createElement('canvas')
+  cv.width = kind === 'wall' ? 1024 : 256
+  cv.height = kind === 'wall' ? 512 : 160
+  const g = cv.getContext('2d')!
+  g.fillStyle = '#071114'
+  g.fillRect(0, 0, cv.width, cv.height)
+  if (kind === 'code') {
+    for (let y = 10; y < cv.height - 6; y += 11) {
+      let x = 10 + Math.floor(r() * 3) * 12
+      while (x < cv.width - 30 && r() < 0.85) {
+        const w = 10 + r() * 46
+        g.fillStyle = ['#3fe0b8', '#7aa2ff', '#e8e6df', '#ffcf5a', '#ff7a90'][Math.floor(r() * 5)]
+        g.fillRect(x, y, w, 5)
+        x += w + 7
+      }
+    }
+  } else {
+    g.fillStyle = '#3fe0b8'
+    g.font = 'bold 64px sans-serif'
+    g.fillText('XETA LABS', 48, 96)
+    g.fillStyle = '#9fb3b8'
+    g.font = '28px sans-serif'
+    g.fillText('Shipping product from Assam', 48, 140)
+    for (let i = 0; i < 18; i++) {
+      const h = 40 + r() * 220
+      g.fillStyle = i % 3 ? '#1f6f62' : '#3fe0b8'
+      g.fillRect(48 + i * 30, 470 - h, 20, h)
+    }
+    g.strokeStyle = '#7aa2ff'
+    g.lineWidth = 5
+    g.beginPath()
+    for (let i = 0; i < 12; i++) g.lineTo(620 + i * 32, 420 - i * 18 - r() * 40)
+    g.stroke()
+  }
+  const t = new THREE.CanvasTexture(cv)
+  t.colorSpace = THREE.SRGBColorSpace
+  const mat = new THREE.MeshStandardMaterial({ map: t, emissiveMap: t, emissive: '#ffffff', emissiveIntensity: 0.9, roughness: 0.3 })
+  return mat
+}
+
+/**
+ * Xeta Labs: a dark tech studio. A walk-in glass ground floor (reception under walnut slats, two long hack tables,
+ * a glass meeting pod, a lounge and a dashboard wall), with a two-storey teal-finned box cantilevered over the
+ * entrance and a planted roof terrace carrying the lit name.
+ */
+function xetaStudio(c: Ctx) {
+  const { b, m } = c
+  const W = 30
+  const z0 = -3
+  const z1 = -25
+  const zc = (z0 + z1) / 2
+  const D = z0 - z1
+  const F = 4.6
+  const door = 4.4
+  const charcoal = new THREE.MeshStandardMaterial({ color: '#1c242b', roughness: 0.6, metalness: 0.2 })
+  const floorMat = new THREE.MeshStandardMaterial({ color: '#2a2f33', roughness: 0.34, metalness: 0.1 })
+  const glass = new THREE.MeshStandardMaterial({ color: '#9fc9c4', metalness: 0.6, roughness: 0.05, transparent: true, opacity: 0.28, depthWrite: false })
+  const neon = new THREE.MeshStandardMaterial({ color: '#3fe0b8', emissive: '#3fe0b8', emissiveIntensity: 0.6 })
+  nightGlass.push(neon)
+  const walnut = new THREE.MeshStandardMaterial({ color: '#5a3a24', roughness: 0.5 })
+  const white = new THREE.MeshStandardMaterial({ color: '#eef0ee', roughness: 0.35 })
+  const dark = new THREE.MeshStandardMaterial({ color: '#15181c', roughness: 0.5, metalness: 0.4 })
+  const teal = new THREE.MeshStandardMaterial({ color: '#1f6f62', roughness: 0.85 })
+
+  // ground floor: plinth, polished floor, charcoal side and back walls, a full glass front with the door
+  solid(c, 0, 0.12, zc, W + 4, 0.24, D + 6, m.granite, 3)
+  b.box(W, 0.06, D, floorMat, c.at(0, 0.27, zc), 3)
+  solid(c, 0, F / 2, z1, W, F, 0.4, charcoal)
+  for (const sx of [-1, 1]) solid(c, sx * W / 2, F / 2, zc, 0.4, F, D, charcoal)
+  const fw = (W - door) / 2
+  for (const sx of [-1, 1]) {
+    const cx = sx * (door / 2 + fw / 2)
+    b.add(new THREE.PlaneGeometry(fw, F - 0.3), glass, c.at(cx, F / 2, z0))
+    for (let x = -fw / 2; x <= fw / 2 + 0.01; x += fw / 4) b.box(0.1, F, 0.16, dark, c.at(cx + x, F / 2, z0))
+    const p = new THREE.Vector3().setFromMatrixPosition(c.at(cx, F / 2, z0))
+    c.physics.fixedBox(p.x, F / 2, p.z, fw / 2, F / 2, 0.12, plotFrame(c.plot).yaw)
+  }
+  b.box(door + 0.3, 0.25, 0.25, dark, c.at(0, 3.4, z0))
+
+  // the cantilevered box: two floors of dark teal glass, overhanging the entrance by 3 m, fins that glow after dark
+  const glassUp = curtainWall(23, '#2f5f5a', '#0f2427')
+  const ub = F + 0.4
+  const ut = ub + 7.4
+  const uw = W + 4
+  const uz0 = z0 + 3
+  const uz1 = z1 - 1
+  solid(c, 0, ub - 0.2, (uz0 + uz1) / 2, uw + 0.4, 0.4, uz0 - uz1 + 0.4, charcoal)
+  solid(c, 0, (ub + ut) / 2, (uz0 + uz1) / 2, uw, ut - ub, uz0 - uz1, glassUp, 14.4)
+  for (let x = -uw / 2; x <= uw / 2 + 0.01; x += 2.4) b.box(0.14, ut - ub, 0.6, neon, c.at(x, (ub + ut) / 2, uz0 + 0.3))
+  for (let z = uz1; z <= uz0 + 0.01; z += 2.4) for (const sx of [-1, 1]) b.box(0.6, ut - ub, 0.14, charcoal, c.at(sx * (uw / 2 + 0.3), (ub + ut) / 2, z))
+  // a teal line under the overhang and down-lights over the entrance
+  b.box(uw, 0.08, 0.2, neon, c.at(0, ub - 0.45, uz0 - 0.2))
+  for (const x of [-6, 0, 6]) b.add(new THREE.CircleGeometry(0.3, 16).rotateX(Math.PI / 2), c.lampMat, c.at(x, ub - 0.41, z0 + 1.5))
+
+  // roof terrace: deck, glass balustrade, planters with shrubs, a pergola and the lit name along the front
+  b.box(uw, 0.12, uz0 - uz1, m.wood, c.at(0, ut + 0.06, (uz0 + uz1) / 2), 2)
+  for (const [w, d, x, z] of [[uw, 0.06, 0, uz0], [uw, 0.06, 0, uz1], [0.06, uz0 - uz1, -uw / 2, (uz0 + uz1) / 2], [0.06, uz0 - uz1, uw / 2, (uz0 + uz1) / 2]] as const) {
+    b.box(w, 1.1, d, glass, c.at(x, ut + 0.65, z))
+    b.box(Math.max(w, 0.1), 0.06, Math.max(d, 0.1), dark, c.at(x, ut + 1.22, z))
+  }
+  for (const x of [-12, -4, 4, 12]) {
+    b.box(3, 0.7, 1.2, charcoal, c.at(x, ut + 0.47, uz1 + 1.4))
+    b.box(2.7, 0.3, 0.9, teal, c.at(x, ut + 0.9, uz1 + 1.4))
+  }
+  for (let x = -9; x <= 9.01; x += 3) b.box(0.18, 2.8, 0.18, dark, c.at(x, ut + 1.5, zc - 4))
+  for (let z = zc - 9; z <= zc + 1; z += 0.9) b.box(19, 0.1, 0.12, walnut, c.at(0, ut + 2.95, z))
+  sign(c, 16, 0, ut + 2.2, uz0 + 0.05)
+
+  // reception under walnut slats and the lit logo
+  for (let x = -9; x <= 9.01; x += 0.45) b.box(0.2, F - 0.6, 0.16, walnut, c.at(x, (F - 0.6) / 2 + 0.3, z1 + 0.3))
+  sign(c, 9, 0, 3.2, z1 + 0.45)
+  solid(c, 0, 0.6, z1 + 4.5, 6, 1.1, 1.2, white, 1)
+  b.box(6.1, 0.05, 1.3, neon, c.at(0, 0.32, z1 + 4.5))
+
+  // two long hack tables with code on every screen, and chairs
+  const code = [xetaScreen('code', 3), xetaScreen('code', 9), xetaScreen('code', 17)]
+  for (const x of [-7, 7]) {
+    solid(c, x, 0.75, zc + 1, 1.8, 0.06, 12, white, 1)
+    for (const dz of [-5.5, 5.5]) b.box(1.6, 0.72, 0.06, dark, c.at(x, 0.36, zc + 1 + dz))
+    for (let k = 0; k < 5; k++) for (const sx of [-1, 1]) {
+      const z = zc - 3.8 + k * 2.4
+      b.box(0.04, 0.45, 0.75, code[(k + (sx > 0 ? 1 : 0) + (x > 0 ? 1 : 0)) % 3], c.at(x + sx * 0.25, 1.06, z))
+      b.box(0.5, 0.06, 0.5, charcoal, c.at(x + sx * 1.35, 0.5, z), 1)
+      b.box(0.06, 0.5, 0.5, charcoal, c.at(x + sx * 1.62, 0.8, z), 1)
+    }
+  }
+  // glass meeting pod at the back right, with a table and a screen
+  const px = 10
+  const pz = z1 + 5
+  b.add(new THREE.PlaneGeometry(8, 3), glass, c.at(px, 1.8, pz + 3.5))
+  b.add(new THREE.PlaneGeometry(7, 3), glass, c.at(px - 4, 1.8, pz, Math.PI / 2))
+  solid(c, px, 0.75, pz, 3.6, 0.06, 1.5, walnut, 1)
+  b.box(3, 1.6, 0.06, xetaScreen('code', 41), c.at(px, 2, z1 + 0.5))
+  // lounge by the front glass: L-sofa, beanbags, rug
+  b.box(7, 0.02, 4.5, new THREE.MeshStandardMaterial({ color: '#203a36', roughness: 1 }), c.at(-9, 0.31, z0 - 3.2), 2)
+  solid(c, -9, 0.42, z0 - 4.8, 5, 0.8, 1, teal, 1)
+  b.box(5, 0.55, 0.25, teal, c.at(-9, 0.95, z0 - 5.3), 1)
+  for (const [x, col] of [[-11.5, '#ffcf5a'], [-9.5, '#ff7a90'], [-7.2, '#7aa2ff']] as const) b.add(new THREE.SphereGeometry(0.5, 14, 10).scale(1, 0.7, 1), new THREE.MeshStandardMaterial({ color: col, roughness: 0.9 }), c.at(x, 0.62, z0 - 2.2))
+  // dashboard wall along the left wall
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), xetaScreen('wall', 5))
+  wall.applyMatrix4(c.at(-W / 2 + 0.25, 2.5, zc - 1, Math.PI / 2))
+  c.group.add(wall)
+  // ceiling: dark, with teal strips and warm panels
+  b.box(W, 0.2, D, charcoal, c.at(0, F - 0.1, zc), 3)
+  for (const z of [z0 - 4, zc, z1 + 4]) {
+    b.box(W - 4, 0.05, 0.12, neon, c.at(0, F - 0.25, z))
+    for (const x of [-7, 7]) b.box(4, 0.05, 0.5, c.lampMat, c.at(x, F - 0.25, z + 2))
+  }
+  const plant = c.models.get('potted_plant_01')
+  if (plant) for (const x of [-13.5, -4, 4, 13.5]) {
+    const g = plant.scene.clone(true)
+    g.applyMatrix4(c.at(x, 0.3, z0 - 0.9).multiply(M(0, 0, 0, 0, 1.1, 1.1, 1.1)))
+    c.group.add(g)
+  }
+  // forecourt: bike racks
+  for (const x of [-12, -10.5, -9, 9, 10.5, 12]) b.box(0.06, 0.8, 0.9, m.rail, c.at(x, 0.4, -1))
+  for (const [x, y, z] of [[-7, 3.4, zc], [7, 3.4, zc], [10, 3, z1 + 5], [0, 3.2, z0 - 4]] as const) nightLight(c, x, y, z, '#d8fff4', 24, 16)
+  nightLight(c, 0, 1.5, 1.5, '#3fe0b8', 20, 14)
 }
 
 /**
@@ -649,53 +812,7 @@ const SPECS: Record<string, Spec> = {
   xeta: {
     title: 'Xeta Labs', sub: 'Assam · Intern 2024 → Full-stack 2025', accent: '#0d1620', ink: '#3fe0b8',
     build(c) {
-      // two office modules at their real size (about 3 m storeys) joined by a glazed lobby
-      const S = 1.12
-      const A = placeModel(c, 'office', -10.5, -13.5, -Math.PI / 2, { passable: /glass|window|door/i, scale: S })
-      const B = placeModel(c, 'office', 10.5, -13.5, -Math.PI / 2, { passable: /glass|window|door/i, scale: S })
-      const { b, m } = c
-      const neon = new THREE.MeshStandardMaterial({ color: '#3fe0b8', emissive: '#3fe0b8', emissiveIntensity: 1.4 })
-      const glass = new THREE.MeshStandardMaterial({ color: '#a9c4d6', metalness: 0.6, roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false })
-      const floorMat = new THREE.MeshStandardMaterial({ color: '#8d8a82', roughness: 0.32 })
-      const wood = m.wood
-      if (A && B) {
-        // the lobby between the modules: 8 m wide, 12 m deep, double-height glass front with a door
-        const z0 = -4.9
-        const z1 = -17
-        const H = 4.6
-        b.box(8, 0.06, z0 - z1, floorMat, c.at(0, 0.03, (z0 + z1) / 2), 3)
-        solid(c, 0, H + 0.1, (z0 + z1) / 2, 8.4, 0.3, z0 - z1 + 0.4, m.trim)
-        solid(c, 0, H / 2, z1, 8, H, 0.3, m.plaster[1])
-        const door = SCALE.doorW + 1.3
-        for (const sx of [-1, 1]) {
-          const cx = sx * (door / 2 + (8 - door) / 4)
-          b.add(new THREE.PlaneGeometry((8 - door) / 2, H), glass, c.at(cx, H / 2, z0))
-          const p = new THREE.Vector3().setFromMatrixPosition(c.at(cx, H / 2, z0))
-          c.physics.fixedBox(p.x, H / 2, p.z, (8 - door) / 4, H / 2, 0.1, plotFrame(c.plot).yaw)
-        }
-        b.box(door + 0.2, 0.22, 0.2, m.frame, c.at(0, SCALE.doorH + 0.5, z0))
-        for (const sx of [-1, 1]) b.box(0.12, H, 0.2, m.frame, c.at(sx * (door / 2), H / 2, z0))
-        // reception desk, sofas, plants
-        solid(c, 0, 0.55, z1 + 3, 3.2, 1.1, 0.8, wood, 1)
-        for (const sx of [-1, 1]) solid(c, sx * 2.6, 0.4, z0 - 3.5, 1.8, 0.8, 0.8, new THREE.MeshStandardMaterial({ color: '#1f4a47', roughness: 0.9 }), 1)
-        const plant = c.models.get('potted_plant_01')
-        if (plant) for (const x of [-3.4, 3.4]) {
-          const g = plant.scene.clone(true)
-          g.applyMatrix4(c.at(x, 0.06, z0 - 1.2))
-          c.group.add(g)
-        }
-        // teal neon: roofline of the lobby and a band across both modules
-        b.box(8.4, 0.12, 0.12, neon, c.at(0, H + 0.4, z0 + 0.1))
-        for (const x of [-10.5, 10.5]) b.box(12, 0.1, 0.1, neon, c.at(x, 7.25, -4.6))
-        b.box(7.6, 0.05, 0.4, c.lampMat, c.at(0, H - 0.2, (z0 + z1) / 2))
-        nightLight(c, 0, 3.4, -9, '#d8fff4', 30, 18)
-        nightLight(c, -10.5, 3.6, -10, '#d8fff4', 30, 20)
-        nightLight(c, 10.5, 3.6, -10, '#d8fff4', 30, 20)
-        nightLight(c, 0, 1.5, 2.5, '#3fe0b8', 20, 14)
-        // a sign above the lobby on two posts
-        for (const x of [-2.6, 2.6]) b.box(0.2, 1.4, 0.2, m.frame, c.at(x, H + 1.1, -5.4))
-      }
-      sign(c, 9, 0, 6.4, -5.2)
+      xetaStudio(c)
     },
   },
   picaku: {

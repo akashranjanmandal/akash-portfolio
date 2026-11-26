@@ -24,6 +24,8 @@ async function get(url) {
 /** id → [simplify ratio, max texture size] */
 const MODELS = {
   island_tree_01: [0.04, 1024],
+  // the 459k-triangle source is then thinned with scripts/thin-foliage.mjs (leaf cards can't be simplified)
+  jacaranda_tree: [0.12, 1024],
   island_tree_02: [0.04, 1024],
   street_lamp_01: [0.5, 512],
   shrub_01: [0.12, 512],

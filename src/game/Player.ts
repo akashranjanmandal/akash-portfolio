@@ -10,6 +10,9 @@ const RADIUS = 0.32
 const HALF = 0.56 // capsule half height (without the caps)
 const EYE = 1.62
 const HEAD_LAYER = 1
+/** how fast the feet move over the ground in each clip at time-scale 1 (measured from planted-foot motion) */
+const WALK_CLIP = 1.43
+const RUN_CLIP = 2.85
 
 export type View = 'third' | 'first'
 
@@ -39,6 +42,15 @@ export class Player {
   vehicle: Vehicle | null = null
   private pedal = 0
   private lastLook = 0
+  /** ground-plane velocity (m/s); speed and facing follow it so starts, stops and turns have weight */
+  private vel = new THREE.Vector2()
+  private airTime = 0
+  /** coyote time and jump buffering, so jumps at an edge or slightly early still count */
+  private sinceGround = 0
+  private jumpQueued = 0
+  /** camera: smoothed pivot height (stairs and kerbs do not jolt it) and a dip when landing */
+  private camY = NaN
+  private landDip = 0
 
   constructor(private physics: Physics, avatarGltf: GLTF, animGltf: GLTF, spawn: THREE.Vector3) {
     this.avatar = avatarGltf.scene
@@ -110,6 +122,9 @@ export class Player {
     this.prev.set(p.x, y, p.z)
     this.curr.copy(this.prev)
     this.velocityY = 0
+    this.vel.set(0, 0)
+    this.speed = 0
+    this.camY = NaN
     if (yaw !== undefined) {
       this.yaw = yaw
       this.facing = yaw
@@ -161,35 +176,57 @@ export class Player {
     const my = input.move.y
     const mag = Math.min(1, Math.hypot(mx, my))
     const target = mag < 0.05 ? 0 : input.sprint ? 6.2 : mag < 0.6 && input.touch ? 1.7 : 3.9
-    this.speed = damp(this.speed, target, 10, dt)
-    // camera-relative direction
+    // camera-relative direction: forward is the camera's look direction on the ground plane (-Z rotated by yaw)
     const sin = Math.sin(this.yaw)
     const cos = Math.cos(this.yaw)
-    // forward is the camera's look direction on the ground plane (-Z rotated by yaw)
-    const fx = -sin
-    const fz = -cos
-    const rx = cos
-    const rz = -sin
-    let dx = fx * my + rx * mx
-    let dz = fz * my + rz * mx
+    let dx = -sin * my + cos * mx
+    let dz = -cos * my - sin * mx
     const l = Math.hypot(dx, dz)
     if (l > 0) {
       dx /= l
       dz /= l
-      const want = Math.atan2(dx, dz)
-      if (this.view === 'first') this.facing = this.yaw + Math.PI
-      else this.facing += angleDelta(this.facing, want) * (1 - Math.exp(-12 * dt))
-    } else if (this.view === 'first') this.facing = this.yaw + Math.PI
+    }
+    // accelerate towards the wanted velocity: brisk on the ground, a little steering in the air
+    const want = this.tmp.set(dx * target, 0, dz * target)
+    const rate = !this.grounded ? 3 : target > this.speed ? 16 : 22
+    const ex = want.x - this.vel.x
+    const ez = want.z - this.vel.y
+    const err = Math.hypot(ex, ez)
+    const step = Math.min(err, rate * dt)
+    if (err > 1e-5) this.vel.add(new THREE.Vector2((ex / err) * step, (ez / err) * step))
+    this.speed = this.vel.length()
+    if (this.view === 'first') this.facing = this.yaw + Math.PI
+    else if (this.speed > 0.3) {
+      // the body turns towards where it is going, quicker at walking pace than at a sprint
+      const head = Math.atan2(this.vel.x, this.vel.y)
+      this.facing += angleDelta(this.facing, head) * (1 - Math.exp(-(this.speed > 5 ? 9 : 13) * dt))
+    }
+    dx = this.vel.x / Math.max(this.speed, 1e-6)
+    dz = this.vel.y / Math.max(this.speed, 1e-6)
 
-    if (this.grounded) {
-      this.velocityY = -1
-      if (input.jump) this.velocityY = 4.6
-    } else this.velocityY -= 9.81 * dt
+    if (input.jump) this.jumpQueued = 0.15
+    this.jumpQueued = Math.max(0, this.jumpQueued - dt)
+    this.sinceGround = this.grounded ? 0 : this.sinceGround + dt
+    if (this.grounded) this.velocityY = -1
+    else this.velocityY -= 9.81 * dt
+    if (this.jumpQueued > 0 && this.sinceGround < 0.12 && this.velocityY <= 0) {
+      this.velocityY = 4.6
+      this.jumpQueued = 0
+      this.sinceGround = 1
+    }
 
     const desired = { x: dx * this.speed * dt, y: this.velocityY * dt, z: dz * this.speed * dt }
     this.controller.computeColliderMovement(this.collider, desired)
     const m = this.controller.computedMovement()
-    this.grounded = this.controller.computedGrounded()
+    const was = this.grounded
+    this.grounded = this.controller.computedGrounded() && this.velocityY <= 0
+    if (!this.grounded) this.airTime += dt
+    else {
+      // a real fall bends the knees: the camera dips with the height fallen
+      if (!was && this.airTime > 0.3) this.landDip = Math.min(0.35, this.airTime * 0.25)
+      this.airTime = 0
+    }
+
     if (this.grounded && this.velocityY < 0) this.velocityY = -1
     this.body.setNextKinematicTranslation({ x: t0.x + m.x, y: t0.y + m.y, z: t0.z + m.z })
     this.curr.set(t0.x + m.x, t0.y + m.y, t0.z + m.z)
@@ -206,9 +243,9 @@ export class Player {
     this.root.rotation.y = this.facing
 
     const s = this.speed
-    const air = !this.grounded
-    const wIdle = air ? 0 : clamp(1 - s / 1.4)
-    const wRun = air ? 0.6 : clamp((s - 2.2) / 1.6)
+    const air = !this.grounded && this.airTime > 0.12
+    const wIdle = air ? 0 : clamp(1 - s / 1.2)
+    const wRun = air ? 0.6 : clamp((s - 2.4) / 1.4)
     const wWalk = air ? 0.4 : clamp(1 - wIdle - wRun)
     const set = (n: string, w: number, scale = 1) => {
       const a = this.actions[n]
@@ -216,9 +253,14 @@ export class Player {
       a.setEffectiveWeight(w)
       a.setEffectiveTimeScale(scale)
     }
+    // play each clip so the planted foot moves at the ground speed: no skating
     set('idle', wIdle)
-    set('walk', wWalk, clamp(s / 1.6, 0.6, 1.6))
-    set('run', wRun, clamp(s / 4.2, 0.8, 1.5))
+    set('walk', wWalk, clamp(s / WALK_CLIP, 0.55, 1.9))
+    set('run', wRun, clamp(s / RUN_CLIP, 0.9, 2.2))
+    // keep the two gaits in step while they blend, so the feet do not scissor
+    const w = this.actions.walk
+    const r = this.actions.run
+    if (w && r && wWalk > 0.02 && wRun > 0.02) r.time = (w.time / w.getClip().duration) * r.getClip().duration
     this.rig.update(dt)
   }
 
@@ -290,7 +332,10 @@ export class Player {
     }
     cam.layers.enable(HEAD_LAYER)
     const pivot = this.tmp.copy(this.root.position)
-    pivot.y += 1.55
+    const py = this.root.position.y + 1.55
+    this.camY = Number.isNaN(this.camY) || Math.abs(this.camY - py) > 3 ? py : damp(this.camY, py, 12, dt)
+    this.landDip = damp(this.landDip, 0, 6, dt)
+    pivot.y = this.camY - this.landDip
     const sin = Math.sin(this.yaw)
     const cos = Math.cos(this.yaw)
     // over the right shoulder
