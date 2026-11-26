@@ -103,7 +103,7 @@ export class Transit {
       }
     }
     const ms = METRO.stations.map(([x, z]) => [x, z] as [number, number])
-    for (const [loop, at] of [[metroA, 0.1], [metroA, 0.6], [metroB, 0.3], [metroB, 0.8]] as [Loop, number][]) mk(loop, 'metro', 3, 17, 17, stopsOf(loop, ms), at, METRO.y + 0.12, 0)
+    for (const [loop, at] of [[metroA, 0.1], [metroA, 0.6], [metroB, 0.3], [metroB, 0.8]] as [Loop, number][]) mk(loop, 'metro', 3, 17, 17, stopsOf(loop, ms), at, 0.12, 0)
     const rA = new Loop(railA)
     const rB = new Loop(railB)
     const sealA = stopsOf(rA, [[RAIL.sealdah, RAIL.z1], [RAIL_RECT.x0, 0]])
@@ -381,17 +381,32 @@ export class Transit {
     const hw = new THREE.MeshStandardMaterial({ color: '#fff6e0', emissive: '#ffd79a', emissiveIntensity: 0.2 })
     this.glow.push({ mat: hw, day: 0.2, night: 5 })
     const junction = (x: number, z: number) => GRID.some((gx) => GRID.some((gz) => Math.hypot(x - gx, z - gz) < 15))
+    this.roadSign(-193, -178, 0, ['RING FLYOVER', 'ENTRY ▲ north-west corner'])
+    this.roadSign(-193, -213, 0, ['RING FLYOVER', 'ENTRY ▲ keep left'])
+    this.roadSign(393, -178, 0, ['RING FLYOVER', 'EXIT ▼ north-east corner'])
+    this.roadSign(425, -190, 0, ['EXIT', 'to the city ▼'])
     for (const path of [ring, rampUp(), rampDown()]) {
       // the structure: a concrete girder with parapets; the driving surface is asphalt laid on top
-      const deck = new THREE.Mesh(
-        sweep(path, [[-W / 2 - 0.4, -1.6], [-W / 2 - 0.4, 0.95], [-W / 2, 0.95], [-W / 2, 0], [W / 2, 0], [W / 2, 0.95], [W / 2 + 0.4, 0.95], [W / 2 + 0.4, -1.6]]),
-        (m.concrete as THREE.MeshStandardMaterial).clone(),
-      )
-      ;(deck.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide
-      deck.castShadow = deck.receiveShadow = true
-      this.group.add(deck)
-      deck.updateMatrixWorld(true)
-      physics.fixedMesh(deck)
+      // parapets only where the deck is off the ground: the ramp's foot is an open slab you can drive straight onto
+      // and no parapet within 32 m of where a ramp meets the ring, so you can drive on and off at the top
+      const low = (p: THREE.Vector3) => p.y < 0.9 || ([[-44, -200], [250, -200]] as const).some(([mx, mz]) => Math.hypot(p.x - mx, p.z - mz) < 32 && p.y > 5)
+      let i0 = 0
+      for (let i = 1; i <= path.length; i++) {
+        if (i < path.length && low(path[i]) === low(path[i0])) continue
+        const run = path.slice(Math.max(0, i0 - 1), Math.min(path.length, i + 1))
+        if (run.length > 1) {
+          const sec: [number, number][] = low(path[i0])
+            ? [[-W / 2, -1.2], [-W / 2, 0], [W / 2, 0], [W / 2, -1.2]]
+            : [[-W / 2 - 0.4, -1.6], [-W / 2 - 0.4, 0.95], [-W / 2, 0.95], [-W / 2, 0], [W / 2, 0], [W / 2, 0.95], [W / 2 + 0.4, 0.95], [W / 2 + 0.4, -1.6]]
+          const deck = new THREE.Mesh(sweep(run, sec), (m.concrete as THREE.MeshStandardMaterial).clone())
+          ;(deck.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide
+          deck.castShadow = deck.receiveShadow = true
+          this.group.add(deck)
+          deck.updateMatrixWorld(true)
+          physics.fixedMesh(deck)
+        }
+        i0 = i
+      }
       const surface = new THREE.Mesh(sweep(path.map((p) => p.clone().setY(p.y + 0.03)), [[-W / 2, 0], [W / 2, 0]], false), asphalt)
       surface.receiveShadow = true
       this.group.add(surface)
@@ -414,6 +429,19 @@ export class Transit {
           b.box(0.15, 0.02, 2.4, m.line, M(p.x, p.y + 0.07, p.z, yaw), 1)
         }
       })
+    }
+  }
+
+  /** a green direction sign on two posts */
+  private roadSign(x: number, z: number, yaw: number, lines: string[]) {
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.6), new THREE.MeshStandardMaterial({ map: labelTexture(lines, '#0e5a2e', '#ffffff', 1024, 256, '#ffffff'), roughness: 0.6, side: THREE.DoubleSide }))
+    board.position.set(x, 4.6, z)
+    board.rotation.y = yaw
+    this.group.add(board)
+    for (const s of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.6, 0.2), this.m.frame)
+      post.position.set(x + Math.cos(yaw) * s * 3.6, 2.3, z - Math.sin(yaw) * s * 3.6)
+      this.group.add(post)
     }
   }
 

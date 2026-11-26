@@ -363,36 +363,50 @@ function stadium(c: Ctx, cx: number, cz: number) {
 
   // the bowl: 22 stepped rows. Seats alternate blue and white with a yellow band; gaps at north and south are the gates,
   // the west end makes room for the pavilion and the east end for the sightscreen
-  const blue = new THREE.MeshStandardMaterial({ color: '#1d4fa8', roughness: 0.8 })
   const white = new THREE.MeshStandardMaterial({ color: '#e8ecf4', roughness: 0.8 })
-  const yellow = new THREE.MeshStandardMaterial({ color: '#f2b705', roughness: 0.8 })
   const rx = (t: number) => RX + 2.2 + t * run
   const rz = (t: number) => RZ + 2.2 + t * run * 0.9
   const SEC = 56
   const gate = (am: number) => Math.abs(Math.cos(am)) < 0.1
   const west = (am: number) => Math.abs(am - Math.PI) < 0.42
   const east = (am: number) => Math.abs(am < Math.PI ? am : am - Math.PI * 2) < 0.2
-  for (let t = 0; t < ROWS; t++) {
-    const h = (t + 1) * rise
-    const band = t % 7 === 6 ? yellow : null
-    for (let i = 0; i < SEC; i++) {
-      const a0 = (i / SEC) * Math.PI * 2
-      const a1 = ((i + 1) / SEC) * Math.PI * 2
-      const am = (a0 + a1) / 2
-      if (gate(am) || (west(am) && t < 15) || (east(am) && t < 7)) continue
-      const rxm = rx(t) + run / 2
-      const rzm = rz(t) + run * 0.45
-      const x = cx + Math.cos(am) * rxm
-      const z = cz + Math.sin(am) * rzm
-      const dx = (Math.cos(a1) - Math.cos(a0)) * rxm
-      const dz = (Math.sin(a1) - Math.sin(a0)) * rzm
-      const len = Math.hypot(dx, dz)
-      const yaw = Math.atan2(-dz, dx)
-      // a chequer of blue and white sections so the bowl reads as seating, not stripes
-      const mat = band ?? ((i + Math.floor(t / 3)) % 2 ? blue : white)
-      b.box(len + 0.04, h, run + 0.03, mat, M(x, CURB + h / 2, z, yaw), 2)
-      c.physics.fixedBox(x, CURB + h / 2, z, (len + 0.04) / 2, h / 2, (run + 0.03) / 2, yaw)
+  // the bowl as one continuous stepped surface with per-vertex colour: blue and white blocks split by grey aisles,
+  // a darker upper tier and a yellow band; gaps at the two gates, the pavilion and the sightscreen
+  {
+    const pos: number[] = []
+    const col: number[] = []
+    const P = (a: number, t: number, y: number) => [cx + Math.cos(a) * (RX + 2.2 + t * run), CURB + y, cz + Math.sin(a) * (RZ + 2.2 + t * run * 0.9)]
+    const quad = (A: number[], B: number[], C: number[], D: number[], k: THREE.Color) => {
+      for (const v of [A, B, C, A, C, D]) {
+        pos.push(...v)
+        col.push(k.r, k.g, k.b)
+      }
     }
+    const grey = new THREE.Color('#8f9298')
+    for (let k = 0; k < SEC; k++) {
+      const a0 = (k / SEC) * Math.PI * 2
+      const a1 = ((k + 1) / SEC) * Math.PI * 2
+      const am = (a0 + a1) / 2
+      if (gate(am)) continue
+      const bl = Math.floor(k / 4) % 2
+      for (let t = 0; t < ROWS; t++) {
+        if ((west(am) && t < 15) || (east(am) && t < 7)) continue
+        const base = k % 4 === 0 ? grey : t % 7 === 6 ? new THREE.Color('#f2b705') : t >= 12 ? new THREE.Color(bl ? '#2b4f8f' : '#cfd6e4') : new THREE.Color(bl ? '#1d4fa8' : '#e8ecf4')
+        const y0 = t * rise
+        const y1 = (t + 1) * rise
+        quad(P(a0, t, y0), P(a1, t, y0), P(a1, t, y1), P(a0, t, y1), base.clone().multiplyScalar(0.8))
+        quad(P(a0, t, y1), P(a1, t, y1), P(a1, t + 1, y1), P(a0, t + 1, y1), base)
+      }
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+    geo.computeVertexNormals()
+    const bowlMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide }))
+    bowlMesh.castShadow = bowlMesh.receiveShadow = true
+    group.add(bowlMesh)
+    bowlMesh.updateMatrixWorld(true)
+    c.physics.fixedMesh(bowlMesh)
   }
   // the facade: a tall wall of pale plaster ribs with rows of lit arched windows, a gap at each gate
   const wall = new THREE.MeshStandardMaterial({ color: '#d8d2c4', roughness: 0.9 })
@@ -413,7 +427,9 @@ function stadium(c: Ctx, cx: number, cz: number) {
     const dz = (Math.sin(a1) - Math.sin(a0)) * rzm
     const len = Math.hypot(dx, dz)
     const yaw = Math.atan2(-dz, dx)
-    b.box(len + 0.05, FH, 0.9, i % 4 === 0 ? rib : wall, M(x, CURB + FH / 2, z, yaw), 3)
+    b.box(len + 0.05, FH, 0.9, wall, M(x, CURB + FH / 2, z, yaw), 3)
+    if (i % 4 === 0) b.box(1.5, FH + 1.2, 2.2, rib, M(x, CURB + (FH + 1.2) / 2, z, yaw), 3)
+    b.box(len + 0.3, 1.2, 1.3, rib, M(x, CURB + FH + 0.4, z, yaw), 3)
     c.physics.fixedBox(x, CURB + FH / 2, z, (len + 0.05) / 2, FH / 2, 0.45, yaw)
     // windows on the outer face, facing away from the field
     const nx = Math.cos(am) / RX
@@ -426,27 +442,46 @@ function stadium(c: Ctx, cx: number, cz: number) {
   // the roof: a continuous canopy over the upper rows, white, with a lit lip along its inner edge
   const lip = new THREE.MeshStandardMaterial({ color: '#fff8e6', emissive: '#fff1c8', emissiveIntensity: 0.2 })
   out.glow.push({ mat: lip, day: 0.2, night: 3.5 })
-  for (let i = 0; i < SEC; i++) {
-    const a0 = (i / SEC) * Math.PI * 2
-    const a1 = ((i + 1) / SEC) * Math.PI * 2
-    const am = (a0 + a1) / 2
-    const r0x = rx(10)
-    const r1x = rx(ROWS) + 2.8
-    const r0z = rz(10)
-    const r1z = rz(ROWS) + 2.8
-    const midx = (r0x + r1x) / 2
-    const midz = (r0z + r1z) / 2
-    const x = cx + Math.cos(am) * midx
-    const z = cz + Math.sin(am) * midz
-    const dx = (Math.cos(a1) - Math.cos(a0)) * midx
-    const dz = (Math.sin(a1) - Math.sin(a0)) * midz
-    const len = Math.hypot(dx, dz)
-    const yaw = Math.atan2(-dz, dx)
-    if (west(am)) continue // the pavilion has its own roof
-    b.box(len + 0.06, 0.55, r1x - r0x, white, M(x, CURB + 13.2, z, yaw), 3)
-    const lx = cx + Math.cos(am) * (r0x - 0.1)
-    const lz = cz + Math.sin(am) * (r0z - 0.1)
-    b.box(len + 0.04, 0.18, 0.3, lip, M(lx, CURB + 12.9, lz, yaw), 1)
+  {
+    const pos: number[] = []
+    const E = (a: number, rxv: number, rzv: number, y: number) => [cx + Math.cos(a) * rxv, CURB + y, cz + Math.sin(a) * rzv]
+    const dark = new THREE.MeshStandardMaterial({ color: '#2a2d33', roughness: 0.6, metalness: 0.5 })
+    for (let i = 0; i < SEC; i++) {
+      const a0 = (i / SEC) * Math.PI * 2
+      const a1 = ((i + 1) / SEC) * Math.PI * 2
+      const am = (a0 + a1) / 2
+      if (west(am)) continue // the pavilion has its own roof
+      const r0x = rx(10)
+      const r1x = rx(ROWS) + 2.8
+      const r0z = rz(10)
+      const r1z = rz(ROWS) + 2.8
+      // outer edge high, inner lip lower: a cantilever sloping towards the pitch
+      const A = E(a0, r1x, r1z, 14.8)
+      const B2 = E(a1, r1x, r1z, 14.8)
+      const C = E(a1, r0x, r0z, 12.6)
+      const D = E(a0, r0x, r0z, 12.6)
+      for (const v of [A, B2, C, A, C, D]) pos.push(...v)
+      const lx = cx + Math.cos(am) * (r0x - 0.1)
+      const lz = cz + Math.sin(am) * (r0z - 0.1)
+      b.box(Math.hypot((Math.cos(a1) - Math.cos(a0)) * r0x, (Math.sin(a1) - Math.sin(a0)) * r0z) + 0.04, 0.2, 0.3, lip, M(lx, CURB + 12.45, lz, Math.atan2(-(Math.sin(a1) - Math.sin(a0)) * r0z, (Math.cos(a1) - Math.cos(a0)) * r0x)), 1)
+      if (i % 3 === 0) {
+        // a steel truss under the roof: a radial beam and a diagonal brace
+        const o = new THREE.Vector3(cx + Math.cos(am) * r1x, CURB + 14.3, cz + Math.sin(am) * r1z)
+        const q = new THREE.Vector3(cx + Math.cos(am) * r0x, CURB + 12.2, cz + Math.sin(am) * r0z)
+        const low = new THREE.Vector3(cx + Math.cos(am) * (r1x - 1), CURB + 10.5, cz + Math.sin(am) * (r1z - 1))
+        for (const [p0, p1] of [[o, q], [low, q]] as const) {
+          const dir = p1.clone().sub(p0)
+          const g = new THREE.BoxGeometry(0.3, 0.3, dir.length())
+          b.add(g, dark, new THREE.Matrix4().compose(p0.clone().add(p1).multiplyScalar(0.5), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.normalize()), new THREE.Vector3(1, 1, 1)))
+        }
+      }
+    }
+    const rg = new THREE.BufferGeometry()
+    rg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    rg.computeVertexNormals()
+    const roofMesh = new THREE.Mesh(rg, new THREE.MeshStandardMaterial({ color: '#f1f1ec', roughness: 0.85, side: THREE.DoubleSide }))
+    roofMesh.castShadow = roofMesh.receiveShadow = true
+    group.add(roofMesh)
   }
 
   // the pavilion at the west end: a two-storey club house with a balcony, a green roof and a flagpole
