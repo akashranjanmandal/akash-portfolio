@@ -3,7 +3,8 @@ import type { Physics } from '../Physics'
 import type { Assets } from '../Assets'
 import { Batch, M } from './Batch'
 import { SCALE } from '../Scale'
-import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame, districtAt } from './Plan'
+import { GRID, ROAD_W, WALK_W, PLOTS, BLOCK_HALF, plotFrame, districtAt, LANES } from './Plan'
+import { sweep } from './paths'
 import { buildDistricts, type DistrictOut } from './Districts'
 import { rng } from '../../utils/math'
 import { addFairy, FairyLights, type FairyBuffer } from './Fairy'
@@ -331,6 +332,7 @@ export class Town {
   tram: Tram | null = null
   readonly fairyBuf: FairyBuffer = { pos: [], col: [] }
   districts: DistrictOut = { trees: [], lamps: [], pools: [], glow: [], water: [] }
+  private laneLamps: [number, number, number][] = []
   fairy: FairyLights | null = null
   update(dt: number) {
     this.tram?.update(dt)
@@ -340,11 +342,14 @@ export class Town {
     const b = new Batch()
     this.roads(b)
     this.blocks(b)
-    this.fillers(b)
+    const laneSpots = this.lanes(b)
+    this.fillers(b, laneSpots)
     tramLine(b)
     streetLife(b, this.mats, this.physics)
-    victoriaMemorial(b, this.mats, this.physics)
+    const monument = victoriaMemorial(b, this.mats, this.physics)
     this.districts = buildDistricts(b, this.mats, this.physics, this.fairyBuf, this.group)
+    this.districts.lamps.push(...this.laneLamps)
+    this.districts.glow.push({ mat: monument, day: 0, night: 0.26 })
     b.build(this.group)
     this.lamps()
     this.buildPools()
@@ -407,14 +412,84 @@ export class Town {
     }
   }
 
+  /** narrow through-lanes between streets, lined with small houses; returns circles the street-side fillers must keep clear of */
+  private lanes(b: Batch) {
+    const m = this.mats
+    const r = rng(5150)
+    const keep: { x: number; z: number; r: number }[] = []
+    const paving = (m.pavement as THREE.MeshStandardMaterial).clone()
+    paving.side = THREE.DoubleSide
+    paving.color = new THREE.Color('#b9a98f')
+    const shrine = new THREE.MeshStandardMaterial({ color: '#e8dcc2', roughness: 0.8 })
+    const saffron = new THREE.MeshStandardMaterial({ color: '#e07b1a', roughness: 0.8 })
+    for (const lane of LANES) {
+      const path = lane.pts.map((p) => new THREE.Vector3(p.x, CURB + 0.06, p.z))
+      const mesh = new THREE.Mesh(sweep(path, [[-1.8, 0], [1.8, 0]], false), paving)
+      mesh.receiveShadow = true
+      this.group.add(mesh)
+      const at = (s: number) => {
+        let k = 1
+        while (k < lane.cum.length - 1 && lane.cum[k] < s) k++
+        const a = lane.pts[k - 1]
+        const c = lane.pts[k]
+        const t = Math.min(1, Math.max(0, (s - lane.cum[k - 1]) / Math.max(1e-6, lane.cum[k] - lane.cum[k - 1])))
+        const dx = c.x - a.x
+        const dz = c.z - a.z
+        const l = Math.hypot(dx, dz) || 1
+        return { x: a.x + dx * t, z: a.z + dz * t, nx: -dz / l, nz: dx / l }
+      }
+      for (let s = 0; s <= lane.len; s += 6) {
+        const p = at(s)
+        keep.push({ x: p.x, z: p.z, r: 6.5 })
+      }
+      const mine: { x: number; z: number; r: number }[] = []
+      for (const side of [-1, 1]) {
+        let s = 7
+        while (s < lane.len - 7) {
+          const w = 5 + r() * 3
+          const d = 6 + r() * 2
+          const p = at(s + w / 2)
+          const off = 1.8 + 0.9 + d / 2
+          const ox = p.x + p.nx * side * off
+          const oz = p.z + p.nz * side * off
+          s += w + 1 + r() * 2.5
+          if (r() < 0.22) continue
+          const rad = Math.max(w, d) / 2
+          // clear of other stretches of this lane and of the houses already placed
+          if (lane.pts.some((q) => Math.hypot(q.x - ox, q.z - oz) < 2.4 + d / 2 - 0.2)) continue
+          if (mine.some((o) => Math.hypot(o.x - ox, o.z - oz) < o.r + rad - 0.5)) continue
+          const floors = 1 + Math.floor(r() * 3)
+          const yaw = Math.atan2(-p.nx * side, -p.nz * side)
+          const wall = r() < 0.3 ? m.brick : m.plaster[Math.floor(r() * m.plaster.length)]
+          townBuilding(b, m, ox, oz, yaw, w, d, floors, wall, r, { shop: r() < 0.3, fairy: this.fairyBuf, sides: false })
+          this.physics.fixedBox(ox, (floors * FLOOR) / 2, oz, w / 2, (floors * FLOOR) / 2, d / 2, yaw)
+          mine.push({ x: ox, z: oz, r: rad })
+          keep.push({ x: ox, z: oz, r: rad })
+        }
+      }
+      // a roadside shrine at the bend, and lamps along the lane
+      const sp = at(lane.len * 0.5)
+      b.box(0.9, 1.2, 0.7, shrine, M(sp.x + sp.nx * 2.3, CURB + 0.6, sp.z + sp.nz * 2.3), 1)
+      b.add(new THREE.ConeGeometry(0.75, 0.7, 4).rotateY(Math.PI / 4), saffron, M(sp.x + sp.nx * 2.3, CURB + 1.55, sp.z + sp.nz * 2.3))
+      this.physics.fixedBox(sp.x + sp.nx * 2.3, CURB + 0.75, sp.z + sp.nz * 2.3, 0.55, 0.75, 0.45)
+      for (const [k, s] of [18, lane.len * 0.5 + 12, lane.len - 18].entries()) {
+        const p = at(s)
+        const side = k % 2 ? 1 : -1
+        this.laneLamps.push([p.x + p.nx * side * 2.3, p.z + p.nz * side * 2.3, Math.atan2(-p.nx * side, -p.nz * side)])
+      }
+    }
+    return keep
+  }
+
   /** ordinary buildings lining the streets wherever no landmark stands */
-  private fillers(b: Batch) {
+  private fillers(b: Batch, extra: { x: number; z: number; r: number }[]) {
     const m = this.mats
     const r = rng(9001)
     const occupied: { x: number; z: number; r: number }[] = PLOTS.map((p) => {
       const f = plotFrame(p)
       return { x: f.x - f.fx * p.d / 2, z: f.z - f.fz * p.d / 2, r: Math.max(p.w, p.d) / 2 + 8 }
     })
+    occupied.push(...extra)
     for (let i = 0; i < GRID.length - 1; i++) {
       for (let j = 0; j < GRID.length - 1; j++) {
         const cx = (GRID[i] + GRID[i + 1]) / 2

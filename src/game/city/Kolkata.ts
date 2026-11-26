@@ -311,7 +311,12 @@ export const MEMORIAL = { x: 0, z: -300 }
 
 export function victoriaMemorial(b: Batch, m: Materials, physics: Physics) {
   const { x, z } = MEMORIAL
-  const marble = m.marble
+  // its own marble, so the monument can be floodlit at night without lighting every other white wall
+  const marble = (m.marble as THREE.MeshStandardMaterial).clone()
+  marble.color = new THREE.Color('#f7f3ec')
+  marble.emissive = new THREE.Color('#fff0d8')
+  marble.emissiveMap = marble.map
+  marble.emissiveIntensity = 0
   const at = (lx: number, ly: number, lz: number, ry = 0) => M(x + lx, ly, z + lz, ry)
   // the approach: avenue, lawns and a long reflecting pool
   const road = new THREE.MeshStandardMaterial({ color: '#d6cdb9', roughness: 0.9 })
@@ -356,4 +361,5 @@ export function victoriaMemorial(b: Batch, m: Materials, physics: Physics) {
   physics.fixedBox(x, 9, z - 6, 33, 9, 16)
   // the asphalt approach needs a floor (terrain is right below it)
   physics.fixedBox(x, -0.2, z + 60, 5, 0.22, 35)
+  return marble
 }

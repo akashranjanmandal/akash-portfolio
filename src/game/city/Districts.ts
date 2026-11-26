@@ -578,6 +578,139 @@ function highway(c: Ctx) {
 }
 
 /** build every district and the highway; returns what the town needs to light and plant them */
+/* ── the Victoria Memorial's gardens ───────────────────────── */
+
+function memorialGarden(c: Ctx) {
+  const { b, m, group, out, physics } = c
+  const marble = m.marble
+  const road = new THREE.MeshStandardMaterial({ color: '#d6cdb9', roughness: 0.9 })
+  const hedge = new THREE.MeshStandardMaterial({ color: '#2f5a2c', roughness: 1 })
+  const bronze = new THREE.MeshStandardMaterial({ color: '#2f3b33', metalness: 0.8, roughness: 0.45 })
+
+  // the lawn, mown in broad stripes
+  const cv = document.createElement('canvas')
+  cv.width = 64
+  cv.height = 8
+  const g = cv.getContext('2d')!
+  g.fillStyle = '#4c8a3e'
+  g.fillRect(0, 0, 32, 8)
+  g.fillStyle = '#579a47'
+  g.fillRect(32, 0, 32, 8)
+  const stripe = new THREE.CanvasTexture(cv)
+  stripe.colorSpace = THREE.SRGBColorSpace
+  stripe.wrapS = stripe.wrapT = THREE.RepeatWrapping
+  const lawnGeo = new THREE.PlaneGeometry(230, 168).rotateX(-Math.PI / 2).translate(0, 0.01, -312)
+  planar(lawnGeo, 12)
+  const lawn = new THREE.Mesh(lawnGeo, new THREE.MeshStandardMaterial({ map: stripe, roughness: 1 }))
+  lawn.receiveShadow = true
+  group.add(lawn)
+
+  // paths: a cross axis in front of the building, a ring behind it, and long side walks
+  const strip = (x0: number, z0: number, x1: number, z1: number, w: number) => {
+    const horizontal = Math.abs(x1 - x0) > Math.abs(z1 - z0)
+    b.box(horizontal ? x1 - x0 : w, 0.05, horizontal ? w : z1 - z0, road, M((x0 + x1) / 2, 0.07, (z0 + z1) / 2), 3)
+  }
+  strip(-112, -265.5, 112, -258.5, 7)
+  strip(-62, -355, 62, -349, 6)
+  for (const s of [-1, 1]) {
+    strip(s * 62 - 3, -352, s * 62 + 3, -262, 6)
+    strip(s * 100 - 2.5, -392, s * 100 + 2.5, -262, 5)
+    strip(s * 62, -355, s * 100, -349, 6)
+  }
+
+  // clipped hedges along the cross walk and the ring
+  for (const s of [-1, 1]) for (const dz of [-4.4, 4.4]) {
+    b.box(56, 0.9, 1.2, hedge, M(s * 80, 0.5, -262 + dz), 1)
+    physics.fixedBox(s * 80, 0.5, -262 + dz, 28, 0.45, 0.6)
+  }
+  for (const dz of [-3.9, 3.9]) b.box(110, 0.9, 1.2, hedge, M(0, 0.5, -352 + dz), 1)
+
+  // two fountains
+  const water = waterMat()
+  out.water.push(water)
+  for (const s of [-1, 1]) {
+    const fx = s * 50
+    const fz = -240
+    b.add(new THREE.CylinderGeometry(7.6, 7.8, 0.9, 40), marble, M(fx, 0.45, fz))
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(6.9, 40).rotateX(-Math.PI / 2), water)
+    pool.position.set(fx, 0.82, fz)
+    group.add(pool)
+    b.add(new THREE.CylinderGeometry(0.7, 1.1, 2.6, 14), marble, M(fx, 1.9, fz))
+    b.add(new THREE.SphereGeometry(1.3, 16, 10), marble, M(fx, 3.5, fz))
+    b.add(new THREE.ConeGeometry(0.5, 2.2, 10), marble, M(fx, 5.2, fz))
+    physics.fixedCylinder(fx, 0.45, fz, 7.8, 0.9)
+    nightLight(c, fx, 0, fz, '#cfe8ff', 40, 26)
+  }
+
+  // the Queen's pavilion: a seated bronze figure on a plinth under a marble canopy
+  const px = -30
+  const pz = -247
+  b.box(8, 0.3, 8, marble, M(px, 0.15, pz), 3)
+  b.box(3.2, 4, 3.2, marble, M(px, 2.3, pz), 3)
+  b.box(1.2, 1.5, 1.0, bronze, M(px, 5.05, pz))
+  b.add(new THREE.ConeGeometry(0.95, 1.7, 12), bronze, M(px, 4.9, pz + 0.1))
+  b.add(new THREE.SphereGeometry(0.3, 12, 8), bronze, M(px, 6.1, pz))
+  b.add(new THREE.CylinderGeometry(0.22, 0.28, 0.25, 10), bronze, M(px, 6.45, pz))
+  for (const dx of [-3.4, 3.4]) for (const dz of [-3.4, 3.4]) {
+    b.add(new THREE.CylinderGeometry(0.3, 0.36, 6, 12), marble, M(px + dx, 3.3, pz + dz))
+    physics.fixedCylinder(px + dx, 3, pz + dz, 0.36, 6)
+  }
+  b.box(8.4, 0.4, 8.4, marble, M(px, 6.5, pz), 3)
+  b.add(new THREE.SphereGeometry(3.6, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), marble, M(px, 6.7, pz))
+  b.add(new THREE.CylinderGeometry(0.2, 0.3, 1.4, 8), bronze, M(px, 10.9, pz))
+  physics.fixedBox(px, 2.3, pz, 1.6, 2.3, 1.6)
+  nightLight(c, px, 0, pz, '#ffd9a0', 36, 20)
+
+  // the gate on the avenue, a name board over it, and railings either side
+  for (const s of [-1, 1]) {
+    solid(c, s * 7.5, 2.6, -228, 1.6, 5.2, 1.6, marble, 0, 3)
+    b.add(new THREE.SphereGeometry(0.8, 14, 10), marble, M(s * 7.5, 5.7, -228))
+    const len = 102
+    const fx = s * (8.8 + len / 2)
+    b.box(len, 0.1, 0.1, m.rail, M(fx, 1.2, -228), 1)
+    b.box(len, 0.1, 0.1, m.rail, M(fx, 0.35, -228), 1)
+    for (let x = 0; x < len; x += 3) b.box(0.07, 1.3, 0.07, m.rail, M(s * (8.8 + x), 0.65, -228), 1)
+    physics.fixedBox(fx, 0.7, -228, len / 2, 0.7, 0.15)
+  }
+  b.box(15, 0.5, 0.8, marble, M(0, 5.4, -228), 3)
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(13, 1.7), new THREE.MeshStandardMaterial({ map: labelTexture(['VICTORIA MEMORIAL', 'Museum & gardens · 1921'], '#10261d', '#f6efd9', 1024, 256, '#d8b25a'), roughness: 0.6 }))
+  board.position.set(0, 6.4, -227.55)
+  group.add(board)
+
+  // trees: a cypress avenue and shade trees round the lawns
+  const cypress = new THREE.MeshStandardMaterial({ color: '#1f4a2b', roughness: 0.95 })
+  for (const s of [-1, 1]) {
+    for (let z = -216; z > -286; z -= 10) {
+      b.add(new THREE.ConeGeometry(1.7, 9, 8), cypress, M(s * 24, 4.8, z))
+      b.add(new THREE.CylinderGeometry(0.2, 0.3, 1, 6), m.wood, M(s * 24, 0.5, z))
+    }
+    for (let x = 14; x < 58; x += 11) b.add(new THREE.ConeGeometry(1.6, 8, 8), cypress, M(s * x, 4.4, -343))
+  }
+  const free = (x: number, z: number) => {
+    if (Math.abs(x) < 46 && z > -338 && z < -276) return false
+    if (Math.abs(x) < 13) return false
+    if (Math.abs(z + 262) < 8 || Math.abs(z + 352) < 7) return false
+    if (Math.abs(Math.abs(x) - 62) < 6 || Math.abs(Math.abs(x) - 100) < 5) return false
+    for (const s of [-1, 1]) if (Math.hypot(x - s * 50, z + 240) < 11) return false
+    return Math.hypot(x - px, z - pz) > 9
+  }
+  const spots: [number, number][] = []
+  for (let z = -386; z < -236; z += 15) for (const s of [-1, 1]) spots.push([s * 112, z])
+  for (let x = -100; x <= 100; x += 17) spots.push([x, -390])
+  for (let k = 0; k < 90; k++) spots.push([(c.r() - 0.5) * 216, -228 - c.r() * 160])
+  for (const [x, z] of spots) if (free(x, z)) tree(c, x, z, 1.0 + c.r() * 0.5)
+
+  // lamps, benches, and a warm pool of light on the monument's forecourt
+  for (const x of [-96, -76, -56, 56, 76, 96]) for (const dz of [-1, 1]) lampAt(c, x, -262 + dz * 5.4, x, -262)
+  for (const z of [-300, -330, -372]) for (const s of [-1, 1]) lampAt(c, s * 66, z, s * 62, z)
+  for (const x of [-88, -66, 66, 88]) {
+    bench(c, x, -257.2, 0)
+    bench(c, x, -266.8, Math.PI)
+  }
+  nightLight(c, 0, 0, -262, '#ffe2b0', 90, 56)
+  nightLight(c, 0, 0, -286, '#ffe2b0', 70, 46)
+}
+
 export function buildDistricts(b: Batch, m: Materials, physics: Physics, fairy: FairyBuffer, group: THREE.Group): DistrictOut {
   const out: DistrictOut = { trees: [], lamps: [], pools: [], glow: [], water: [] }
   const c: Ctx = { b, m, physics, fairy, group, out, r: rng(2468) }
@@ -586,6 +719,7 @@ export function buildDistricts(b: Batch, m: Materials, physics: Physics, fairy: 
     else if (d.kind === 'stadium') stadium(c, d.cx, d.cz)
     else plaza(c, d.cx, d.cz)
   }
+  memorialGarden(c)
   highway(c)
   return out
 }

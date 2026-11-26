@@ -10,10 +10,11 @@ import { Traffic, kerbSpots } from './Traffic'
 import { FairyLights } from './city/Fairy'
 import { buildPortal } from './hills/Portal'
 import { Transit } from './city/Transit'
+import { Ghat } from './city/Ghat'
 import { ChunkedTerrain, terrainMaterial, microDetail } from './Terrain'
 import { smoothstep } from '../utils/math'
 import { Landmarks } from './city/Landmarks'
-import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt, railDist } from './city/Plan'
+import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt, railDist, laneDist } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -51,6 +52,12 @@ function groundAt(x: number, z: number) {
     const dz = Math.max(0, -232 - z, z + 198)
     const t = Math.min(1, Math.max(0, (dz - 2) / 14))
     return -0.3 * (1 - t) + g * t
+  }
+  // the Victoria Memorial's gardens lie on a level lawn
+  if (Math.abs(x) < 134 && z > -410 && z < -224) {
+    const dd = Math.max(Math.abs(x) - 120, -404 - z, z + 226, 0)
+    const t = Math.min(1, dd / 14)
+    return -0.02 * (1 - t) + g * t
   }
   // the railway circuit sits on a flat strip all the way round
   const rd = railDist(x, z)
@@ -120,6 +127,7 @@ export class World {
   traffic!: Traffic
   fairy!: FairyLights
   transit!: Transit
+  ghat!: Ghat
   /** positions the traffic should brake for besides the player (e.g. the player's taxi) */
   obstacles: THREE.Vector3[] = []
   night = 0
@@ -193,6 +201,8 @@ export class World {
     this.group.add(this.landmarks.group)
     this.transit = new Transit(this.physics, this.town.mats)
     this.group.add(this.transit.group)
+    this.ghat = new Ghat(this.physics, this.town.mats)
+    this.group.add(this.ghat.group)
     for (const g of [this.town.group, this.landmarks.group]) {
       for (const o of g.children) {
         const m = o as THREE.Mesh
@@ -278,9 +288,12 @@ export class World {
       if (districtAt(x, z)) return false
       if (z > -240 && z < -190) return false
       if (railDist(x, z) < 16) return false
+      if (x > -234 && x < -196 && z > 140 && z < 240) return false
+      if (Math.abs(x) < 125 && z > -402 && z < -224) return false
       if (Math.abs(x - HIGHWAY.x) < 90 && z > HIGHWAY.z0 - 120 && z < HIGHWAY.z1 + 30) return false
       const town = inTown(x, z, 5)
       if (town && !inBlockMiddle(x, z)) return false
+      if (town && laneDist(x, z) < 11) return false
       return !plots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)
     }
     const d = this.quality.density
@@ -332,6 +345,7 @@ export class World {
     this.terrain.update(player, dt)
     this.town.update(dt)
     this.transit.update(dt, this.night)
+    this.ghat.update(dt, this.night)
     this.town.tram?.setNight(this.night)
     const tram = this.town.tram?.group.position
     this.traffic.update(dt, player, tram ? [...this.obstacles, tram] : this.obstacles, this.night)

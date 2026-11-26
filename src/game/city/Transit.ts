@@ -6,7 +6,7 @@ import { labelTexture } from '../hills/Portal'
 import { rng } from '../../utils/math'
 import { RING, ringPath, rampUp, rampDown } from './Flyover'
 import { GRID, RAIL_RECT } from './Plan'
-import { Loop, roundedLoop, offsetLoop } from './paths'
+import { Loop, roundedLoop, offsetLoop, sweep } from './paths'
 
 /* ──────────────────────────────────────────────────────────────
    RAILWAYS
@@ -36,50 +36,6 @@ export const RAIL = {
 }
 
 type Glow = { mat: THREE.MeshStandardMaterial; day: number; night: number }
-
-/** a long strip along a polyline: the cross-section (lateral offset, height) is swept down the path */
-export function sweep(path: THREE.Vector3[], section: [number, number][], closed = true) {
-  const pos: number[] = []
-  const uv: number[] = []
-  const idx: number[] = []
-  let s = 0
-  const rows = section.length
-  for (let i = 0; i < path.length; i++) {
-    if (i > 0) s += path[i].distanceTo(path[i - 1])
-    const a = path[Math.max(0, i - 1)]
-    const b = path[Math.min(path.length - 1, i + 1)]
-    const dx = b.x - a.x
-    const dz = b.z - a.z
-    const l = Math.hypot(dx, dz) || 1
-    const nx = -dz / l
-    const nz = dx / l
-    let c = 0
-    for (let k = 0; k < rows; k++) {
-      const [o, h] = section[k]
-      pos.push(path[i].x + nx * o, path[i].y + h, path[i].z + nz * o)
-      uv.push(s / 4, c / 4)
-      if (k < rows - 1) c += Math.hypot(section[k + 1][0] - o, section[k + 1][1] - h)
-    }
-  }
-  const segs = closed ? rows : rows - 1
-  for (let i = 0; i < path.length - 1; i++) {
-    for (let k = 0; k < segs; k++) {
-      const a = i * rows + k
-      const b = i * rows + ((k + 1) % rows)
-      const c = (i + 1) * rows + k
-      const d = (i + 1) * rows + ((k + 1) % rows)
-      idx.push(a, c, b, b, c, d)
-    }
-  }
-  const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
-  g.setIndex(idx)
-  g.computeVertexNormals()
-  const n = g.attributes.normal as THREE.BufferAttribute
-  for (let i = 0; i < n.count; i++) if (!Number.isFinite(n.getX(i) + n.getY(i) + n.getZ(i))) n.setXYZ(i, 0, 1, 0)
-  return g
-}
 
 type Train = {
   cars: THREE.Group[]
@@ -349,7 +305,7 @@ export class Transit {
     b.box(platformX[1] - platformX[0], 0.9, 6, m.concrete, M((platformX[0] + platformX[1]) / 2, 0.45, z2 + 6.6), 3)
     physics.fixedBox((platformX[0] + platformX[1]) / 2, 0.45, z2 + 6.6, (platformX[1] - platformX[0]) / 2, 0.45, 3)
     b.box(platformX[1] - platformX[0], 0.03, 0.4, m.yellowLine, M((platformX[0] + platformX[1]) / 2, 0.92, z2 + 4.2), 1)
-    this.bridge(b, -334, 24)
+    this.bridge(b, -404, 24)
     this.bridge(b, 459, 24)
 
     // the terminal: colonial arcades facing the grid's south road, a clock tower, a long platform with a canopy

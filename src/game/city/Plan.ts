@@ -1,3 +1,5 @@
+import { rng } from '../../utils/math'
+
 /* ──────────────────────────────────────────────────────────────
    TOWN PLAN (metres, y up, -z = north)
    A grid of streets every 100 m. Each portfolio stop owns a block
@@ -7,15 +9,17 @@
 
 export const GRID = [-200, -100, 0, 100, 200, 300, 400]
 /** the suburban railway circuit (double track, the near track is at the rectangle's edge): Howrah in the west, Sealdah in the south */
-export const RAIL_RECT = { x0: -396, x1: 418, z0: -330, z1: 456 }
+export const RAIL_RECT = { x0: -396, x1: 418, z0: -400, z1: 456 }
 /** where the circuit crosses the Hooghly (z ranges of the two rail bridges) */
-export const RAIL_GAPS: [number, number][] = [[-346, -322], [447, 471]]
+export const RAIL_GAPS: [number, number][] = [[-416, -392], [447, 471]]
 /** distance from (x, z) to the railway corridor (the outline of the circuit) */
 export function railDist(x: number, z: number) {
   const cx = (RAIL_RECT.x0 + RAIL_RECT.x1) / 2
   const cz = (RAIL_RECT.z0 + RAIL_RECT.z1) / 2
   return Math.abs(Math.max(Math.abs(x - cx) - (RAIL_RECT.x1 - RAIL_RECT.x0) / 2, Math.abs(z - cz) - (RAIL_RECT.z1 - RAIL_RECT.z0) / 2))
 }
+/** the riverside ghat on the east bank of the Hooghly (the embankment is cut for its steps) */
+export const GHAT = { z0: 150, z1: 230 }
 export const ROAD_W = 10
 export const WALK_W = 3.5
 /** the paved town: streets run to the west bank (x = -200) and out east and south to 400 */
@@ -101,6 +105,7 @@ export const SIGHTS = [
   { id: 'eden', label: 'Eden Gardens', sub: 'The cricket cathedral', x: 150, z: 250 },
   { id: 'sealdah', label: 'Sealdah terminal', sub: 'Suburban trains · level crossing', x: 135, z: 436 },
   { id: 'esplanade', label: 'Esplanade metro', sub: 'Kolkata Metro, on the viaduct', x: 0, z: 100 },
+  { id: 'ghat', label: 'Hooghly Ghat', sub: 'Steps to the river · ferries', x: -217, z: 190 },
   { id: 'flyover', label: 'Ring flyover', sub: 'High road round the whole city · ramp at the NW corner', x: -200, z: -204 },
 ]
 
@@ -115,3 +120,55 @@ export const DISTRICTS: { id: string; kind: DistrictKind; cx: number; cz: number
   { id: 'eden', kind: 'stadium', cx: 150, cz: 250, label: 'Eden Gardens', sub: 'The cricket cathedral' },
 ]
 export const districtAt = (x: number, z: number) => DISTRICTS.find((d) => Math.abs(x - d.cx) < 50 && Math.abs(z - d.cz) < 50)
+
+/* ── narrow lanes ───────────────────────────────────────────── */
+
+export type Lane = { pts: { x: number; z: number }[]; cum: number[]; len: number }
+
+/**
+ * Through-lanes: in every other block a narrow winding lane cuts from one street to the neighbouring one,
+ * lined with small houses. They always connect two streets, so none is a dead end.
+ */
+export const LANES: Lane[] = (() => {
+  const r = rng(4242)
+  const occ = PLOTS.map((p) => {
+    const f = plotFrame(p)
+    return { x: f.x - (f.fx * p.d) / 2, z: f.z - (f.fz * p.d) / 2, r: Math.max(p.w, p.d) / 2 + 8 }
+  })
+  const dirs: [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0]]
+  const out: Lane[] = []
+  for (let i = 0; i < GRID.length - 1; i++) {
+    for (let j = 0; j < GRID.length - 1; j++) {
+      const cx = (GRID[i] + GRID[i + 1]) / 2
+      const cz = (GRID[j] + GRID[j + 1]) / 2
+      if (districtAt(cx, cz) || (i + j) % 2) continue
+      const e1 = Math.floor(r() * 4)
+      const e2 = (e1 + (r() < 0.5 ? 1 : 3)) % 4
+      const [d1x, d1z] = dirs[e1]
+      const [d2x, d2z] = dirs[e2]
+      const o1 = (r() - 0.5) * 24
+      const o2 = (r() - 0.5) * 24
+      const R = BLOCK_HALF + WALK_W
+      const s = { x: cx + d1x * R - d1z * o1, z: cz + d1z * R + d1x * o1 }
+      const e = { x: cx + d2x * R - d2z * o2, z: cz + d2z * R + d2x * o2 }
+      const c = { x: cx + (r() - 0.5) * 16, z: cz + (r() - 0.5) * 16 }
+      const pts: { x: number; z: number }[] = []
+      for (let k = 0; k <= 20; k++) {
+        const t = k / 20
+        pts.push({ x: (1 - t) ** 2 * s.x + 2 * t * (1 - t) * c.x + t * t * e.x, z: (1 - t) ** 2 * s.z + 2 * t * (1 - t) * c.z + t * t * e.z })
+      }
+      if (pts.some((p) => occ.some((o) => (o.x - p.x) ** 2 + (o.z - p.z) ** 2 < (o.r + 4) ** 2))) continue
+      const cum = [0]
+      for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].z - pts[k - 1].z))
+      out.push({ pts, cum, len: cum[cum.length - 1] })
+    }
+  }
+  return out
+})()
+
+/** distance from (x, z) to the nearest lane centreline sample */
+export function laneDist(x: number, z: number) {
+  let best = Infinity
+  for (const l of LANES) for (const p of l.pts) best = Math.min(best, Math.hypot(p.x - x, p.z - z))
+  return best
+}
