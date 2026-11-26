@@ -68,6 +68,7 @@ Coordinates: metres, x east, z south (so -z is north), y up. Grid lines every 10
 
 ## What has been built (all on this branch)
 
+- People: ~700 instanced pedestrians (`Pedestrians.ts`) on every pavement, station platforms and forecourts, Eden apron, Memorial paths, ghat steps and the bridge footway.
 - Scale-correct town (character, doors, floors, roads share `Scale.ts`), enterable Xeta Labs office, GOBT campus and home, project buildings per `Plan.ts`, phone UI, minimap and full map (map marker follows the vehicle when driving).
 - Day / golden / night cycle, glowing lamps, fairy lights, procedural star sky.
 - Hooghly river, Howrah Bridge and Station; **Hooghly ghat** (22 stone steps, pavilion, two temples, tea stalls, moored boats, ferries looping the river).
