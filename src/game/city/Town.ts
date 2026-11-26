@@ -238,7 +238,8 @@ export function townBuilding(b: Batch, m: Materials, x: number, z: number, yaw: 
     [w / 2, 0, Math.PI / 2, d],
     [-w / 2, 0, -Math.PI / 2, d],
   ]
-  const faces = opts.sides === false ? allFaces.slice(0, 1) : allFaces
+  // rows hide the side walls, but the backs are seen across the block interiors
+  const faces = opts.sides === false ? allFaces.slice(0, 2) : allFaces
   const green = r() < 0.7
   const balconies = r() < 0.6
   const arched = r() < 0.45

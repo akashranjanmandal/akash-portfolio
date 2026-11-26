@@ -256,6 +256,115 @@ function solid(ctx: Ctx, lx: number, ly: number, lz: number, w: number, h: numbe
   ctx.physics.fixedBox(p.x, p.y, p.z, w / 2, h / 2, d / 2, plotFrame(ctx.plot).yaw)
 }
 
+/** materials whose windows light up after dark (set by Landmarks.update) */
+const nightGlass: THREE.MeshStandardMaterial[] = []
+
+/** a curtain-wall texture covering 8 bays × 4 floors (14.4 m square), so lit windows do not repeat floor by floor */
+function curtainWall(seed: number) {
+  const r = rng(seed)
+  const N = 512
+  const make = (lit: boolean) => {
+    const cv = document.createElement('canvas')
+    cv.width = cv.height = N
+    const g = cv.getContext('2d')!
+    g.fillStyle = lit ? '#000' : '#26394a'
+    g.fillRect(0, 0, N, N)
+    const bw = N / 8
+    const fh = N / 4
+    for (let f = 0; f < 4; f++) for (let k = 0; k < 8; k++) {
+      const x = k * bw
+      const y = f * fh
+      if (lit) {
+        g.fillStyle = r() < 0.55 ? (r() < 0.8 ? '#ffe2b0' : '#cfe6ff') : '#000'
+        g.fillRect(x + 3, y + 3, bw - 6, fh * 0.78 - 3)
+      } else {
+        const grd = g.createLinearGradient(x, y, x + bw, y + fh)
+        grd.addColorStop(0, '#3e6680')
+        grd.addColorStop(1, '#1d3142')
+        g.fillStyle = grd
+        g.fillRect(x + 3, y + 3, bw - 6, fh * 0.78 - 3)
+        g.fillStyle = '#9aa3ab'
+        g.fillRect(x, y + fh * 0.78, bw, fh * 0.22) // spandrel at the slab
+      }
+    }
+    const t = new THREE.CanvasTexture(cv)
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.colorSpace = THREE.SRGBColorSpace
+    t.anisotropy = 4
+    return t
+  }
+  const mat = new THREE.MeshStandardMaterial({ map: make(false), emissiveMap: make(true), emissive: '#ffffff', emissiveIntensity: 0, metalness: 0.75, roughness: 0.12 })
+  nightGlass.push(mat)
+  return mat
+}
+
+/** GOBT's tower: twelve glazed floors on the walk-in podium, aluminium fins, a set-back crown with the lit name */
+function gobtTower(c: Ctx, zc: number, base: number) {
+  const { b } = c
+  const glass = curtainWall(7)
+  const fin = new THREE.MeshStandardMaterial({ color: '#c9ced3', metalness: 0.8, roughness: 0.35 })
+  const tw = 30
+  const td = 16
+  const floors = 12
+  const FH = 3.6
+  const top = base + floors * FH
+  solid(c, 0, (base + top) / 2, zc, tw, top - base, td, glass, 14.4)
+  // vertical fins every bay and a slab line every floor give the wall depth
+  for (let x = -tw / 2; x <= tw / 2 + 0.01; x += 1.8) for (const sz of [-1, 1]) b.box(0.12, top - base, 0.5, fin, c.at(x, (base + top) / 2, zc + sz * (td / 2 + 0.2)))
+  for (let z = -td / 2; z <= td / 2 + 0.01; z += 1.8) for (const sx of [-1, 1]) b.box(0.5, top - base, 0.12, fin, c.at(sx * (tw / 2 + 0.2), (base + top) / 2, zc + z))
+  for (let f = 0; f <= floors; f++) b.box(tw + 0.6, 0.18, td + 0.6, fin, c.at(0, base + f * FH, zc))
+  // the crown: two set-back plant floors and a parapet, a lit name on the front and back, a slim mast
+  solid(c, 0, top + 3.6, zc, tw - 6, 7.2, td - 4, glass, 14.4)
+  b.box(tw - 5.4, 0.6, td - 3.4, fin, c.at(0, top + 7.5, zc))
+  const name = new THREE.MeshStandardMaterial({ map: signTexture(c.spec.title, '', '#141218', '#e8b923', c.spec.logo ? (c.tex.get(c.spec.logo)?.image as HTMLImageElement | undefined) : undefined), emissive: '#ffffff', emissiveIntensity: 0.5 })
+  name.emissiveMap = name.map
+  nightGlass.push(name)
+  for (const sz of [-1, 1]) {
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(16, 3.2), name)
+    board.applyMatrix4(c.at(0, top + 3.6, zc + sz * ((td - 4) / 2 + 0.05), sz < 0 ? Math.PI : 0))
+    c.group.add(board)
+  }
+  b.box(0.35, 12, 0.35, fin, c.at(0, top + 13.2, zc))
+  b.add(new THREE.SphereGeometry(0.35, 10, 8), c.lampMat, c.at(0, top + 19.3, zc))
+}
+
+/** the garden behind the HQ: a lawn, a long reflecting pool with a fountain, hedged beds and benches */
+function gobtGarden(c: Ctx) {
+  const { b, m } = c
+  b.box(72, 0.04, 44, m.grass, c.at(0, 0.03, -54), 6)
+  const water = new THREE.MeshStandardMaterial({ color: '#2d5a6b', roughness: 0.04, metalness: 0.4 })
+  solid(c, 0, 0.25, -54, 30, 0.5, 8, m.granite, 2)
+  b.box(29, 0.05, 7, water, c.at(0, 0.52, -54), 2)
+  for (const x of [-9, 0, 9]) b.add(new THREE.CylinderGeometry(0.15, 0.25, 1.6, 10), m.granite, c.at(x, 1.1, -54))
+  const hedge = new THREE.MeshStandardMaterial({ color: '#2f5a2c', roughness: 1 })
+  for (const sx of [-1, 1]) {
+    solid(c, sx * 26, 0.5, -54, 2, 1, 30, hedge, 1)
+    for (const z of [-44, -64]) {
+      solid(c, sx * 14, 0.45, z, 2.2, 0.08, 0.6, m.wood, 1)
+      b.box(0.1, 0.45, 0.5, m.frame, c.at(sx * 14 - 1, 0.22, z))
+      b.box(0.1, 0.45, 0.5, m.frame, c.at(sx * 14 + 1, 0.22, z))
+    }
+  }
+  const shrub = c.models.get('shrub_01')
+  if (shrub) for (const [x, z] of [[-30, -36], [30, -36], [-30, -72], [30, -72], [-18, -72], [18, -72], [-6, -72], [6, -72]]) {
+    const g = shrub.scene.clone(true)
+    g.applyMatrix4(c.at(x, 0.05, z, 0).multiply(M(0, 0, 0, 0, 2.2, 2.2, 2.2)))
+    c.group.add(g)
+  }
+  for (const x of [-18, 18]) nightLight(c, x, 0.5, -54, '#cfe8ff', 22, 18)
+}
+
+/** three flagpoles at the kerb */
+function flags(c: Ctx, x: number, z: number) {
+  const { b, m } = c
+  const colours = [['#ff9933', '#ffffff', '#138808'], ['#141218', '#e8b923', '#141218'], ['#141218', '#e8b923', '#141218']]
+  colours.forEach((cols, i) => {
+    const px = x + i * 2.4
+    b.box(0.14, 9, 0.14, m.frame, c.at(px, 4.5, z))
+    cols.forEach((col, k) => b.box(0.03, 0.45, 2.2, new THREE.MeshStandardMaterial({ color: col, side: THREE.DoubleSide }), c.at(px, 8.6 - k * 0.45, z - 1.15, Math.PI / 2)))
+  })
+}
+
 /**
  * GOBT head office: a two-storey glass-fronted building you can walk into. Reception under a
  * glowing logo wall, rows of desks, glass meeting rooms, and a staircase up to a mezzanine.
@@ -271,7 +380,8 @@ function gobtHq(c: Ctx) {
   const H = F * 2
   const door = 4.4
   const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.9, roughness: 0.3, emissive: '#e8a313', emissiveIntensity: 0.15 })
-  const floorMat = new THREE.MeshStandardMaterial({ color: '#8d8a82', roughness: 0.32, metalness: 0.05 })
+  // polished pale terrazzo: it catches the lights and the glass like a real lobby floor
+  const floorMat = new THREE.MeshStandardMaterial({ color: '#d9d4ca', roughness: 0.12, metalness: 0.05 })
   const wallMat = new THREE.MeshStandardMaterial({ color: '#ece8df', roughness: 0.9 })
   const dark = new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.55, metalness: 0.3 })
   const wood = m.wood
@@ -375,6 +485,24 @@ function gobtHq(c: Ctx) {
     }
   }
 
+  // finishes: oak slats behind reception, a living green wall, wood-clad columns, rugs, pendants and a video wall upstairs
+  const oak = new THREE.MeshStandardMaterial({ color: '#a9774a', roughness: 0.55 })
+  for (let x = -10; x <= 10.01; x += 0.5) b.box(0.22, F - 0.5, 0.18, oak, c.at(x, (F - 0.5) / 2 + 0.3, z1 + 0.32))
+  const moss = (m.grass as THREE.MeshStandardMaterial).clone()
+  moss.color = new THREE.Color('#5f9a4a')
+  b.box(0.25, H - 1, 10, moss, c.at(W / 2 - 0.35, H / 2, zc + 3), 1.5)
+  for (const x of [-9, 9]) for (const z of [z0 - 10, z1 + 9]) solid(c, x, H / 2, z, 0.9, H, 0.9, oak, 1)
+  const rug = new THREE.MeshStandardMaterial({ color: '#2d3340', roughness: 1 })
+  for (const sx of [-1, 1]) b.box(7, 0.02, 5, rug, c.at(sx * 12, 0.31, z0 - 3.5), 2)
+  b.box(30, 0.02, 12, rug, c.at(1, 0.31, z0 - 11.6), 2)
+  const shade = new THREE.MeshStandardMaterial({ color: '#141218', roughness: 0.5, metalness: 0.6 })
+  for (let row = 0; row < 3; row++) for (const x of [-12, -5, 5, 12]) {
+    const z = z0 - 8 - row * 3.6
+    b.box(0.02, F - 2.6, 0.02, shade, c.at(x, F - (F - 2.6) / 2 - 0.1, z))
+    b.add(new THREE.CylinderGeometry(0.12, 0.45, 0.35, 16, 1, true), shade, c.at(x, 2.5, z))
+    b.add(new THREE.CircleGeometry(0.42, 16).rotateX(Math.PI / 2), c.lampMat, c.at(x, 2.33, z))
+  }
+  screen(c, 10, 4, F + 2.6, z1 + 0.4)
   // lights: ceiling panels glow all day, real lights after dark
   for (const x of [-14, 0, 14]) for (const z of [z0 - 5, z0 - 13, z0 - 20]) {
     b.box(5, 0.06, 0.5, c.lampMat, c.at(x, F - 0.12, z))
@@ -385,6 +513,10 @@ function gobtHq(c: Ctx) {
   for (const x of [-14, 14]) nightLight(c, x, 1.2, z0 + 3, '#ffd79a', 18, 14)
   // lit sign over the entrance and gold trim
   sign(c, 14, 0, H + 2.4, z0 + 0.9)
+  gobtTower(c, zc, H + 0.4)
+  gobtGarden(c)
+  flags(c, -W / 2 + 1, z0 + 2.5)
+  flags(c, W / 2 - 5.8, z0 + 2.5)
 }
 
 export const ESTATE = {
@@ -607,9 +739,8 @@ const SPECS: Record<string, Spec> = {
   gobt: {
     title: 'GOBT', sub: 'Group Of Blooming Technicians · HQ', accent: '#141218', ink: '#e8b923', logo: 'img/logos/gobt.webp', screen: 'img/tex/gobt.webp',
     build(c) {
-      // head office at the street, with the apartment campus rising behind it
+      // head office: a walk-in podium under a glass tower, a garden behind
       gobtHq(c)
-      placeModel(c, 'campus', 0, -60, 0, { passable: /glass|window|door/i, floor: 0.66, scale: 0.68})
       screen(c, 12, 28, 4.2, -2)
     },
   },
@@ -793,6 +924,7 @@ export class Landmarks {
     }
     for (const l of this.pool) l.intensity = night > 0.3 ? ((l as THREE.PointLight & { _power?: number })._power ?? 0) * night : 0
     this.lampMat.emissiveIntensity = 0.2 + (night > 0.3 ? night * 4 : 0)
+    for (const g of nightGlass) g.emissiveIntensity = night > 0.3 ? night * 1.6 : 0.04
     for (const [i, mk] of this.markers.entries()) {
       const s = 1 + Math.sin(t * 2.4 + i) * 0.06
       mk.scale.set(s, 1, s)
