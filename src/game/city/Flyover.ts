@@ -1,64 +1,51 @@
 import * as THREE from 'three'
+import { roundedLoop, offsetLoop } from './paths'
 
-/* The flyover: a road that leaves the grid's north-east junction, curves east, climbs
-   over the Eastern Bypass and ends on a round viewing platform. Shared by the
-   builder (Transit) and the traffic that drives it. */
+/* The ring flyover: an elevated road all the way round the city above its outer roads (like Kolkata's Maa
+   flyover, but a closed loop), its piers in the middle of the road below. Two ramps join it to the ground:
+   one up from the Victoria Memorial road, one down to the north-east corner of the grid. */
 
-export const FLY = { y: 8.5, x0: 240, z: -285, plat: { x: 512, r: 17 }, width: 11 }
+export const RING = { y: 9.2, corners: [[-200, -200], [400, -200], [400, 400], [-200, 400]] as [number, number][], r: 24, width: 13 }
 
 const smooth = (t: number) => {
   const c = Math.min(1, Math.max(0, t))
   return c * c * (3 - 2 * c)
 }
 
-/** the centreline from the junction (ground) to the platform (deck height) */
-export function flyoverPath(): THREE.Vector3[] {
+/** the ring's centreline, clockwise seen from above (east along the north side) */
+export function ringPath() {
+  return roundedLoop(RING.corners, RING.r, 4).map((p) => p.setY(RING.y))
+}
+
+/** up: from the Memorial road (x = 0) east along z = -216, climbing, then merging into the ring at x = 150 */
+export function rampUp() {
   const pts: THREE.Vector3[] = []
-  for (let z = -205; z > -245; z -= 4) pts.push(new THREE.Vector3(200, 0, z))
-  for (let a = 0; a <= 1.0001; a += 1 / 16) {
-    const f = a * Math.PI * 0.5
-    pts.push(new THREE.Vector3(240 - 40 * Math.cos(f), 0, -245 - 40 * Math.sin(f)))
+  for (let x = -6; x <= 112; x += 4) pts.push(new THREE.Vector3(x, RING.y * smooth((x - 4) / 108), -216))
+  for (let k = 1; k <= 10; k++) {
+    const t = k / 10
+    pts.push(new THREE.Vector3(112 + 38 * t, RING.y, -216 + 16 * smooth(t)))
   }
-  for (let x = FLY.x0 + 4; x <= FLY.plat.x - FLY.plat.r + 2; x += 4) pts.push(new THREE.Vector3(x, FLY.y * smooth((x - FLY.x0) / 110), FLY.z))
   return pts
 }
 
-/** a closed loop for traffic: out along one lane, a U-turn on the platform, back on the other, a U-turn at the junction */
-export function flyoverLoop(): THREE.Vector3[] {
-  const c = flyoverPath()
-  const lane = 2.5
-  const off = (side: number) =>
-    c.map((p, i) => {
-      const a = c[Math.max(0, i - 1)]
-      const b = c[Math.min(c.length - 1, i + 1)]
-      const dx = b.x - a.x
-      const dz = b.z - a.z
-      const l = Math.hypot(dx, dz) || 1
-      // left of travel is (-dz, dx)/l
-      return new THREE.Vector3(p.x + (-dz / l) * lane * side, p.y, p.z + (dx / l) * lane * side)
-    })
-  const out = off(1)
-  const back = off(1).reverse() // the same left offset while travelling the other way is the opposite lane
-  const back2 = c.map((p, i) => {
-    const a = c[Math.max(0, i - 1)]
-    const b = c[Math.min(c.length - 1, i + 1)]
-    const dx = b.x - a.x
-    const dz = b.z - a.z
-    const l = Math.hypot(dx, dz) || 1
-    return new THREE.Vector3(p.x + (-dz / l) * -lane, p.y, p.z + (dx / l) * -lane)
-  }).reverse()
-  void back
-  const loop: THREE.Vector3[] = [...out]
-  const e = out[out.length - 1]
-  const f = back2[0]
-  // U-turn on the platform
-  for (let k = 1; k < 8; k++) {
-    const t = (k / 8) * Math.PI
-    const mx = (e.x + f.x) / 2
-    const mz = (e.z + f.z) / 2
-    const r = Math.hypot(e.x - f.x, e.z - f.z) / 2
-    loop.push(new THREE.Vector3(mx + Math.sin(t) * (r + 6), e.y, mz + Math.cos(t) * r * (e.z > f.z ? 1 : -1)))
+/** down: leaving the ring at x = 250, out to z = -216, descending east, then turning south into the grid's corner */
+export function rampDown() {
+  const pts: THREE.Vector3[] = []
+  for (let k = 0; k <= 10; k++) {
+    const t = k / 10
+    pts.push(new THREE.Vector3(250 + 38 * t, RING.y, -200 - 16 * smooth(t)))
   }
-  loop.push(...back2)
-  return loop
+  for (let x = 292; x <= 380; x += 4) pts.push(new THREE.Vector3(x, RING.y * (1 - smooth((x - 288) / 92)), -216))
+  for (let k = 1; k <= 6; k++) {
+    const a = (k / 6) * Math.PI * 0.5
+    pts.push(new THREE.Vector3(380 + 20 * Math.sin(a), 0, -216 + 20 * (1 - Math.cos(a))))
+  }
+  return pts
+}
+
+/** traffic on the ring: one loop each way, each on the left of its own direction */
+export function ringTrafficLoops() {
+  const cw = ringPath()
+  const ccw = ringPath().reverse()
+  return [offsetLoop(cw, -2.6), offsetLoop(ccw, -2.6)]
 }
