@@ -13,7 +13,7 @@ import { Transit } from './city/Transit'
 import { ChunkedTerrain, terrainMaterial, microDetail } from './Terrain'
 import { smoothstep } from '../utils/math'
 import { Landmarks } from './city/Landmarks'
-import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt } from './city/Plan'
+import { PLOTS, plotFrame, SPAWN, SIGHTS, inTown, GRID, HIGHWAY, districtAt, railDist } from './city/Plan'
 
 /* ──────────────────────────────────────────────────────────────
    WORLD (metres)
@@ -46,24 +46,17 @@ function groundAt(x: number, z: number) {
     const t = Math.min(1, Math.max(0, (hz - 24) / 14))
     return -0.08 * (1 - t) + g * t
   }
-  // the flyover's ground-level start sits just under the road surface, so the grass never grows through it
-  if (x > 165 && x < 310 && z > -315 && z < -198) {
-    const dx = Math.max(0, 180 - x, x - 295)
-    const dz = Math.max(0, -300 - z, z + 205)
-    const t = Math.min(1, Math.max(0, (Math.hypot(dx, dz) - 4) / 16))
+  // the ring flyover's ramps start at ground level just under the road surface, so grass never grows through them
+  if (x > -230 && x < 420 && z > -236 && z < -194) {
+    const dz = Math.max(0, -232 - z, z + 198)
+    const t = Math.min(1, Math.max(0, (dz - 2) / 14))
     return -0.3 * (1 - t) + g * t
   }
-  // the flyover's east end and its platform stand on a levelled pad beside the Bypass
-  if (x > 400 && x < 560 && z > -340 && z < -230) {
-    const fd = Math.hypot(Math.max(0, x - 512), z + 285) + Math.max(0, 420 - x)
-    const t = Math.min(1, Math.max(0, (Math.abs(z + 285) + Math.max(0, x - 512) - 26) / 22))
-    void fd
+  // the railway circuit sits on a flat strip all the way round
+  const rd = railDist(x, z)
+  if (rd < 26) {
+    const t = Math.min(1, Math.max(0, (rd - 13) / 13))
     return -0.08 * (1 - t) + g * t
-  }
-  // the suburban railway south of the grid sits on a flat strip too
-  if (x > -215 && x < 435) {
-    const rz = Math.abs(z - 459)
-    if (rz < 48) return -0.08 * (1 - Math.min(1, Math.max(0, (rz - 32) / 16))) + g * Math.min(1, Math.max(0, (rz - 32) / 16))
   }
   return g
 }
@@ -283,9 +276,8 @@ export class World {
       if (x < -200 && Math.abs(z) < 12) return false
       if (Math.abs(x - STATION.x) < 26 && Math.abs(z - STATION.z) < 56) return false
       if (districtAt(x, z)) return false
-      // nothing grows on the flyover's line
-      if (z > -305 && z < -265 && x > 190 && x < 545) return false
-      if (x > 185 && x < 250 && z > -300 && z < -200) return false
+      if (z > -240 && z < -190) return false
+      if (railDist(x, z) < 16) return false
       if (Math.abs(x - HIGHWAY.x) < 90 && z > HIGHWAY.z0 - 120 && z < HIGHWAY.z1 + 30) return false
       const town = inTown(x, z, 5)
       if (town && !inBlockMiddle(x, z)) return false

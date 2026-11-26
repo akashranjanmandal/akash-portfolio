@@ -6,6 +6,16 @@
 ────────────────────────────────────────────────────────────── */
 
 export const GRID = [-200, -100, 0, 100, 200, 300, 400]
+/** the suburban railway circuit (double track, the near track is at the rectangle's edge): Howrah in the west, Sealdah in the south */
+export const RAIL_RECT = { x0: -396, x1: 418, z0: -330, z1: 456 }
+/** where the circuit crosses the Hooghly (z ranges of the two rail bridges) */
+export const RAIL_GAPS: [number, number][] = [[-346, -322], [447, 471]]
+/** distance from (x, z) to the railway corridor (the outline of the circuit) */
+export function railDist(x: number, z: number) {
+  const cx = (RAIL_RECT.x0 + RAIL_RECT.x1) / 2
+  const cz = (RAIL_RECT.z0 + RAIL_RECT.z1) / 2
+  return Math.abs(Math.max(Math.abs(x - cx) - (RAIL_RECT.x1 - RAIL_RECT.x0) / 2, Math.abs(z - cz) - (RAIL_RECT.z1 - RAIL_RECT.z0) / 2))
+}
 export const ROAD_W = 10
 export const WALK_W = 3.5
 /** the paved town: streets run to the west bank (x = -200) and out east and south to 400 */
@@ -91,7 +101,7 @@ export const SIGHTS = [
   { id: 'eden', label: 'Eden Gardens', sub: 'The cricket cathedral', x: 150, z: 250 },
   { id: 'sealdah', label: 'Sealdah terminal', sub: 'Suburban trains · level crossing', x: 135, z: 436 },
   { id: 'esplanade', label: 'Esplanade metro', sub: 'Kolkata Metro, on the viaduct', x: 0, z: 100 },
-  { id: 'flyover', label: 'Viewing flyover', sub: 'Over the Bypass · Kolkata from above', x: 512, z: -285 },
+  { id: 'flyover', label: 'Ring flyover', sub: 'High road round the whole city · ramp at the NW corner', x: -200, z: -204 },
 ]
 
 /** the Eastern Bypass: a divided highway running north-south beyond the east edge of the grid */

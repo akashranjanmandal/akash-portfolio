@@ -17,18 +17,22 @@ export function ringPath() {
   return roundedLoop(RING.corners, RING.r, 4).map((p) => p.setY(RING.y))
 }
 
-/** up: from the Memorial road (x = 0) east along z = -216, climbing, then merging into the ring at x = 150 */
+/** up: from the north-west junction, 16 m north, then east, climbing for 100 m and merging into the ring's north side */
 export function rampUp() {
   const pts: THREE.Vector3[] = []
-  for (let x = -6; x <= 112; x += 4) pts.push(new THREE.Vector3(x, RING.y * smooth((x - 4) / 108), -216))
+  for (let k = 0; k <= 6; k++) {
+    const a = (k / 6) * Math.PI * 0.5
+    pts.push(new THREE.Vector3(-200 + 20 * (1 - Math.cos(a)), 0, -196 - 20 * Math.sin(a)))
+  }
+  for (let x = -176; x <= -84; x += 4) pts.push(new THREE.Vector3(x, RING.y * smooth((x + 180) / 96), -216))
   for (let k = 1; k <= 10; k++) {
     const t = k / 10
-    pts.push(new THREE.Vector3(112 + 38 * t, RING.y, -216 + 16 * smooth(t)))
+    pts.push(new THREE.Vector3(-84 + 40 * t, RING.y, -216 + 16 * smooth(t)))
   }
   return pts
 }
 
-/** down: leaving the ring at x = 250, out to z = -216, descending east, then turning south into the grid's corner */
+/** down: leaving the ring at x = 250, out to z = -216, descending east, then turning south into the north-east junction */
 export function rampDown() {
   const pts: THREE.Vector3[] = []
   for (let k = 0; k <= 10; k++) {

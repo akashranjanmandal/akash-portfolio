@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Physics } from '../Physics'
 import { Batch, M } from './Batch'
 import type { Materials } from './Town'
+import { RAIL_GAPS } from './Plan'
 
 /* ──────────────────────────────────────────────────────────────
    THE HOOGHLY, HOWRAH BRIDGE AND HOWRAH STATION
@@ -145,7 +146,17 @@ export class Howrah {
     const edge = RIVER.half + RIVER.bank + 0.6
     for (const side of [-1, 1]) {
       const x = RIVER.x + side * edge
-      for (const [z0, z1] of [[-700, -9.5], [9.5, 700]]) {
+      // the embankment stops where the two railway bridges cross
+      const segs: [number, number][] = []
+      for (const [a, c] of [[-700, -9.5], [9.5, 700]]) {
+        let from = a
+        for (const [g0, g1] of RAIL_GAPS) if (g0 > from && g1 < c) {
+          segs.push([from, g0])
+          from = g1
+        }
+        segs.push([from, c])
+      }
+      for (const [z0, z1] of segs) {
         const len = z1 - z0
         const cz = (z0 + z1) / 2
         b.box(1.2, 1.4, len, m.concrete, M(x, 0.25, cz), 3)

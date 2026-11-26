@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { RAPIER, type Physics } from './Physics'
 import { ambassador, type Ambassador } from './Ambassador'
 import { GRID, ROAD_W, HIGHWAY } from './city/Plan'
-import { flyoverLoop } from './city/Flyover'
+import { ringTrafficLoops } from './city/Flyover'
 import { rng } from '../utils/math'
 
 /* ──────────────────────────────────────────────────────────────
@@ -142,21 +142,23 @@ export class Traffic {
       const length = hdist[hw.length]
       this.drivers.push({ car, body, path: hw, dist: hdist, length, s: (i / hn) * length + r() * 40, speed: 16, stuck: 0, cruise: 16 + r() * 5 })
     }
-    // the flyover: a couple of cars going up to the viewing platform and back
-    const fl = flyoverLoop()
-    const fdist = [0]
-    for (let k = 1; k <= fl.length; k++) fdist.push(fdist[k - 1] + fl[k - 1].distanceTo(fl[k % fl.length]))
-    for (let i = 0; i < 2; i++) {
-      const car = ambassador()
-      this.group.add(car.model)
-      const pool = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 9).rotateX(-Math.PI / 2), this.poolMat)
-      pool.position.set(0, 0.05, -6.6)
-      pool.renderOrder = 1
-      car.model.add(pool)
-      const body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased())
-      physics.world.createCollider(RAPIER.ColliderDesc.cuboid(0.85, 0.7, 2.2).setTranslation(0, 0.8, 0), body)
+    // the ring flyover: cars going round and round, one stream each way
+    for (const fl of ringTrafficLoops()) {
+      const fdist = [0]
+      for (let k = 1; k <= fl.length; k++) fdist.push(fdist[k - 1] + fl[k - 1].distanceTo(fl[k % fl.length]))
       const length = fdist[fl.length]
-      this.drivers.push({ car, body, path: fl, dist: fdist, length, s: (i / 2) * length, speed: 8, stuck: 0, cruise: 10 })
+      const n = count > 8 ? 5 : 3
+      for (let i = 0; i < n; i++) {
+        const car = ambassador()
+        this.group.add(car.model)
+        const pool = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 9).rotateX(-Math.PI / 2), this.poolMat)
+        pool.position.set(0, 0.05, -6.6)
+        pool.renderOrder = 1
+        car.model.add(pool)
+        const body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased())
+        physics.world.createCollider(RAPIER.ColliderDesc.cuboid(0.85, 0.7, 2.2).setTranslation(0, 0.8, 0), body)
+        this.drivers.push({ car, body, path: fl, dist: fdist, length, s: (i / n) * length + r() * 60, speed: 12, stuck: 0, cruise: 13 + r() * 5 })
+      }
     }
   }
 
