@@ -43,7 +43,7 @@ const MODELS = {
 
 const TEXTURES = ['aerial_grass_rock', 'asphalt_02', 'concrete_tiles', 'red_brick_03', 'plastered_wall_02', 'coast_sand_rocks_02', 'forrest_ground_01', 'metal_plate', 'rocky_terrain_02', 'beige_wall_001', 'painted_concrete', 'concrete_wall_008', 'white_plaster_02', 'brick_wall_10', 'corrugated_iron_02', 'wood_planks', 'granite_tile', 'marble_01', 'cobblestone_floor_08']
 
-const THREE_MODELS = { 'readyplayer.me.glb': 'avatar.glb', 'Xbot.glb': 'xbot-anims.glb', 'CarbonFrameBike.glb': 'bike.glb', 'ferrari.glb': 'car.glb' }
+const THREE_MODELS = { 'Xbot.glb': 'xbot-anims.glb', 'CarbonFrameBike.glb': 'bike.glb' }
 
 async function model(id, [ratio, size]) {
   const dest = out('models', `${id}.glb`)
